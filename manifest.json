@@ -1,6 +1,6 @@
 {
-  "name": "PRINT RUN Phase 0 計測",
-  "short_name": "PR0計測",
+  "name": "PRINT RUN ―弾丸輪廻―",
+  "short_name": "PRINT RUN",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -6,321 +6,507 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="PR0計測">
+<meta name="apple-mobile-web-app-title" content="PRINT RUN">
 <meta name="theme-color" content="#0b0f1a">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="icon" href="icon-192.png">
-<title>PRINT RUN Phase 0 計測</title>
+<title>PRINT RUN ―弾丸輪廻―</title>
 <style>
-  :root { --bg:#0b0f1a; --fg:#e6f1ff; --acc:#00e5ff; --acc2:#ff3d81; --mut:#8b98b3; --ok:#39ff88; --ng:#ff5252;
-          --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px); --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px); }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
-              font-family:-apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; overscroll-behavior:none; touch-action:manipulation; }
-  body { display:flex; flex-direction:column; height:100dvh; }
-  header { padding:calc(var(--sat) + 6px) 12px 6px; font-size:13px; color:var(--mut); display:flex; justify-content:space-between; background:#0e1424; }
-  main { flex:1; position:relative; overflow:hidden; }
-  section { position:absolute; inset:0; display:none; overflow:auto; padding:10px 12px; -webkit-overflow-scrolling:touch; }
-  section.active { display:block; }
-  section.canvasWrap { padding:0; overflow:hidden; }
-  canvas { display:block; width:100%; height:100%; touch-action:none; image-rendering:pixelated; image-rendering:crisp-edges; }
-  nav { display:flex; border-top:1px solid #1e2740; padding-bottom:var(--sab); background:#0e1424; }
-  nav button { flex:1; padding:10px 0 8px; background:none; border:0; color:var(--mut); font-size:12px; }
-  nav button.active { color:var(--acc); }
-  .row { display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
-  button.b { padding:10px 14px; background:#16203a; color:var(--fg); border:1px solid #2a3a60; border-radius:8px; font-size:15px; }
-  button.b.on { background:var(--acc); color:#000; border-color:var(--acc); }
-  table { border-collapse:collapse; width:100%; font-size:13px; }
-  td,th { border-bottom:1px solid #1e2740; padding:6px 4px; text-align:left; vertical-align:top; }
-  .hud { position:absolute; left:8px; top:8px; font-size:14px; line-height:1.5; background:rgba(0,0,0,.6); padding:6px 10px; border-radius:8px; pointer-events:none; max-width:70%; }
-  .hud b { font-size:30px; }
-  .ctl { position:absolute; right:8px; top:8px; display:flex; flex-direction:column; gap:6px; }
-  .ctl button.b { padding:8px 10px; font-size:14px; }
-  .foot { position:absolute; left:8px; right:8px; bottom:8px; font-size:13px; background:rgba(0,0,0,.6); padding:6px 10px; border-radius:8px; pointer-events:none; }
-  .panel { position:absolute; left:8px; right:8px; bottom:8px; background:rgba(10,14,26,.96); padding:10px; border-radius:10px; font-size:14px; border:1px solid #2a3a60; }
-  .ok { color:var(--ok);} .ng { color:var(--ng);} .mut{color:var(--mut);}
-  textarea { width:100%; height:180px; background:#0e1424; color:var(--fg); border:1px solid #2a3a60; font-size:12px; -webkit-user-select:text; user-select:text; }
-  .chk { display:flex; align-items:center; gap:8px; margin:6px 0; }
-  .chk span { flex:1; font-size:14px; }
-  .chk button.b { padding:6px 10px; font-size:14px; min-width:76px; }
-  h2 { font-size:16px; margin:6px 0 4px; color:var(--acc); }
-  p { margin:6px 0; font-size:14px; line-height:1.5; }
-  small { color:var(--mut); }
+  :root { --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px); --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px); }
+  html, body { margin:0; padding:0; height:100%; background:#0b0f1a; overflow:hidden; overscroll-behavior:none;
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; touch-action:none;
+    font-family:-apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  canvas { display:block; position:fixed; inset:0; width:100%; height:100%; touch-action:none; }
+  #probe { position:absolute; left:-9999px; top:0; width:0; height:0; visibility:hidden; padding:var(--sat) var(--sar) var(--sab) var(--sal); }
 </style>
 </head>
 <body>
-<header><span>PRINT RUN Phase 0 計測 <span class="mut" id="ver"></span></span><span class="mut" id="mode">-</span></header>
-<main>
-  <section id="s1" class="canvasWrap active">
-    <canvas id="c1"></canvas>
-    <div class="hud">FPS <b id="fps">--</b><br><span id="fpsinfo" class="mut">敵 50 / 低解像度</span></div>
-    <div class="ctl">
-      <button class="b on" data-n="50">敵 50</button>
-      <button class="b" data-n="100">敵 100</button>
-      <button class="b" data-n="200">敵 200</button>
-      <button class="b" id="resTgl">低解像度</button>
-      <button class="b" id="auto">自動計測</button>
-    </div>
-    <div class="foot" id="autoMsg">「自動計測」を押すと 敵50→100→200 を各8秒ずつ測って記録します（この解像度で）。終わったら「高解像度」に切り替えてもう1回。</div>
-  </section>
-
-  <section id="s2" class="canvasWrap">
-    <canvas id="c2"></canvas>
-    <div class="hud">入力→描画 <b id="lat">--</b> ms<br><span class="mut" id="latinfo">左半分に指を置いて動かす</span><br><span id="gflags" class="mut">自動検知: なし</span></div>
-    <div class="ctl"><button class="b" id="gchk">ジェスチャ記録</button><button class="b" id="latReset">リセット</button></div>
-    <div class="panel" id="gpanel" style="display:none;"></div>
-  </section>
-
-  <section id="s3">
-    <h2>③ 保存の残り方</h2>
-    <p>起動形態: <b id="dm3">-</b><br>永続化: <span id="persist">-</span> ／ 使用量: <span id="quota">-</span></p>
-    <div class="row"><button class="b" id="wsave">セーブを書く</button><button class="b" id="wclear">セーブを消す</button></div>
-    <table>
-      <tr><th>保存先</th><th>ID</th><th>書いた日時</th><th>経過</th><th>形態</th></tr>
-      <tr><td>localStorage</td><td id="ls_id">-</td><td id="ls_at">-</td><td id="ls_el">-</td><td id="ls_dm">-</td></tr>
-      <tr><td>IndexedDB</td><td id="idb_id">-</td><td id="idb_at">-</td><td id="idb_el">-</td><td id="idb_dm">-</td></tr>
-    </table>
-    <p>オフライン起動（Service Worker）: <b id="swst">-</b></p>
-    <p><small>手順: 「セーブを書く」→ アプリを閉じて開き直す → 表にIDが残るか → 端末を再起動して再確認 → 機内モードで起動できるか。Safariのタブで開いた版とホーム画面版は保存先が別になる見込み（実測）。</small></p>
-    <div id="stChk"></div>
-  </section>
-
-  <section id="s4">
-    <h2>④ 音</h2>
-    <p>AudioContext: <b id="actx">未作成</b></p>
-    <div class="row">
-      <button class="b" id="beep1">効果音（Web Audio）</button>
-      <button class="b" id="beep2">効果音（audio要素）</button>
-      <button class="b" id="bgm">BGMループ 開始/停止</button>
-    </div>
-    <p><small>手順: 3つとも鳴るか → 本体横の消音スイッチをONにして3つ → ホーム画面に戻り、再びこのアプリを開いて3つ。</small></p>
-    <div id="auChk"></div>
-    <p id="aulog" class="mut"></p>
-  </section>
-
-  <section id="s5">
-    <h2>⑤ 結果</h2>
-    <div class="row"><button class="b" id="mk">結果テキストを生成</button><button class="b" id="cp">コピー</button><button class="b" id="rs">全結果を消去</button></div>
-    <textarea id="out" readonly></textarea>
-    <table id="fpsT"></table>
-    <p><small>この画面のスクショを送っていただければ判定できます。</small></p>
-  </section>
-</main>
-<nav>
-  <button class="active" data-s="s1">①描画</button>
-  <button data-s="s2">②タッチ</button>
-  <button data-s="s3">③保存</button>
-  <button data-s="s4">④音</button>
-  <button data-s="s5">⑤結果</button>
-</nav>
-
+<div id="probe"></div>
+<canvas id="c"></canvas>
 <script>
-(() => {
 'use strict';
-const VERSION = 'p0-0.1.1';
-const $ = id => document.getElementById(id);
-const R = { version: VERSION, fps: [], lat: {}, gestures: {}, storage: {}, audio: {}, env: {} };
+/* =====================================================================
+   PRINT RUN ―弾丸輪廻―  Phase 1 縦切り（p1）
+   主人公1・銃1・敵2種・最小の生成器（部屋グリッド型）・死亡→再開
+   操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）
+   ===================================================================== */
+const VERSION = 'p1-0.1.0';
 
-function saveR(){ try { localStorage.setItem('pr0_results', JSON.stringify(R)); } catch (e) {} }
-function loadR(){ try { const s = JSON.parse(localStorage.getItem('pr0_results') || 'null'); if (s) { R.fps = s.fps || []; R.lat = s.lat || {}; R.gestures = s.gestures || {}; R.storage = s.storage || {}; R.audio = s.audio || {}; } } catch (e) {} }
-function pad(n){ return String(n).padStart(2, '0'); }
-function nowStr(){ const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
-function displayMode(){ if (navigator.standalone) return 'ホーム画面(standalone)'; if (matchMedia('(display-mode: standalone)').matches) return 'standalone'; if (matchMedia('(display-mode: fullscreen)').matches) return 'fullscreen'; return 'ブラウザ'; }
-function safeArea(){ const cs = getComputedStyle(document.documentElement); return ['--sat', '--sar', '--sab', '--sal'].map(k => cs.getPropertyValue(k).trim() || '0').join(' '); }
-function envInfo(){ return { ua: navigator.userAgent, mode: displayMode(), screen: screen.width + 'x' + screen.height, window: innerWidth + 'x' + innerHeight, dpr: Math.round(devicePixelRatio * 100) / 100, safeArea: safeArea(), protocol: location.protocol, sw: ('serviceWorker' in navigator) }; }
+// ---------- 定数 ----------
+const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
+const GRID = 4;                                                                 // 部屋グリッド 4×4
+const DIRS = { N: { dx: 0, dy: -1 }, S: { dx: 0, dy: 1 }, W: { dx: -1, dy: 0 }, E: { dx: 1, dy: 0 } };
+const OPP = { N: 'S', S: 'N', W: 'E', E: 'W' };
+// 手触りの調整値（Phase 1 で遊びながら動かす場所はここに集約）
+const TUNE = {
+  player:  { hp: 5, spd: 175, fireRate: 0.2, bulletSpd: 480, range: 280, inv: 0.9 },          // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)
+  rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
+  shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1 }, // 射撃型: 近すぎ→下がる／狙い(秒)／照準ロック(残り秒)／弾速／再装填
+  room:    { base: 3, rand: 3, bonusFrom: 3, max: 6, spawnDist: 170 },                          // 1部屋の敵＝base+0..rand-1（3部屋目以降+1・上限max）／主人公からの最短出現距離
+};
+const COL = {
+  bg: '#0b0f1a', floor: '#121c33', grid: '#1a2742', wall: '#24335a', wallEdge: '#4a6ab0',
+  doorClosed: '#ff2d7a', doorOpen: '#00e5ff', player: '#00e5ff', rusher: '#ff2d7a', shooter: '#ffb347',
+  ebullet: '#ffd166', pbullet: '#eaffff', text: '#cfe3ff', mut: '#7f93b8', hp: '#ff4d6d', portal: '#b388ff', white: '#ffffff'
+};
+// 部屋テンプレ（内側10×16の座標・[c, r, w, h] の壁ブロック）。ドアの進入路（内側 cols4-5 の上下2行・rows7-8 の左右2列）は空けてある
+const TPL = [
+  [],                                                                 // 0 空（開始・出口部屋）
+  [[2, 3, 2, 2], [6, 3, 2, 2], [2, 11, 2, 2], [6, 11, 2, 2]],         // 1 四柱
+  [[3, 7, 4, 2]],                                                     // 2 中央ブロック（横一直線の射線を切る）
+  [[2, 5, 6, 1], [2, 10, 6, 1]],                                      // 3 二本の横棒
+  [[1, 3, 1, 1], [8, 3, 1, 1], [4, 6, 1, 1], [5, 9, 1, 1], [1, 12, 1, 1], [8, 12, 1, 1]], // 4 散在
+  [[0, 5, 3, 1], [7, 5, 3, 1], [0, 10, 3, 1], [7, 10, 3, 1]],         // 5 壁から伸びる棚
+];
 
-// ---------- 共通: 3状態チェックリスト ----------
-function chkList(el, key, items, title){
-  el.innerHTML = '';
-  if (title) { const h = document.createElement('div'); h.innerHTML = '<b>' + title + '</b>'; el.appendChild(h); }
-  R[key].manual = R[key].manual || {};
-  items.forEach(([k, label]) => {
-    const d = document.createElement('div'); d.className = 'chk';
-    const s = document.createElement('span'); s.textContent = label;
-    const b = document.createElement('button'); b.className = 'b';
-    const cur = R[key].manual[k] || '未確認';
-    b.textContent = cur;
-    b.addEventListener('click', () => { const order = ['未確認', 'はい', 'いいえ']; R[key].manual[k] = order[(order.indexOf(cur) + 1) % 3]; saveR(); chkList(el, key, items, title); });
-    d.appendChild(s); d.appendChild(b); el.appendChild(d);
-  });
+// ---------- 乱数（シード付き）----------
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ---------- 保存（設定＋通算）----------
+const SAVE_KEY = 'printrun.p1';
+let S = { sound: true, meter: true, runs: 0, kills: 0, clears: 0, bestRooms: 0 };
+try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(S, JSON.parse(j)); } catch (e) { }
+function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { } }
+
+// ---------- 音（Web Audio・合成のみ）----------
+const AU = { ctx: null, gain: null };
+function au() {
+  if (!AU.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null; AU.ctx = new AC(); AU.gain = AU.ctx.createGain(); AU.gain.gain.value = S.sound ? 0.5 : 0; AU.gain.connect(AU.ctx.destination); }
+  if (AU.ctx.state !== 'running') AU.ctx.resume();
+  return AU.ctx;
+}
+function setSound(on) { S.sound = on; save(); if (AU.gain) AU.gain.gain.value = on ? 0.5 : 0; }
+function tone(f0, f1, dur, type, vol, delay) {
+  const c = au(); if (!c || !S.sound) return; const t0 = c.currentTime + (delay || 0);
+  const o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
+  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur); o.connect(g); g.connect(AU.gain); o.start(t0); o.stop(t0 + dur + 0.02);
+}
+let noiseBuf = null;
+function noise(dur, vol, delay) {
+  const c = au(); if (!c || !S.sound) return;
+  if (!noiseBuf) { noiseBuf = c.createBuffer(1, c.sampleRate * 0.5, c.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const t0 = c.currentTime + (delay || 0); const s = c.createBufferSource(); s.buffer = noiseBuf; const g = c.createGain(); g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur); s.connect(g); g.connect(AU.gain); s.start(t0); s.stop(t0 + dur + 0.02);
+}
+const SFX = {
+  shot() { tone(900, 300, 0.06, 'square', 0.12); noise(0.03, 0.08); },
+  hit() { tone(420, 200, 0.05, 'triangle', 0.12); },
+  kill() { noise(0.15, 0.22); tone(240, 60, 0.22, 'sawtooth', 0.18); },
+  hurt() { tone(170, 70, 0.28, 'sawtooth', 0.3); noise(0.1, 0.15); },
+  tell() { tone(1400, 1400, 0.05, 'square', 0.07); },
+  dash() { noise(0.09, 0.15); tone(300, 700, 0.09, 'sine', 0.08); },
+  eshot() { tone(640, 320, 0.08, 'sawtooth', 0.1); },
+  door() { tone(520, 780, 0.14, 'sine', 0.18); tone(780, 1040, 0.16, 'sine', 0.16, 0.12); },
+  spawn() { tone(200, 420, 0.12, 'sine', 0.08); },
+  portal() { tone(440, 880, 0.3, 'triangle', 0.12); },
+  clear() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.18, 'triangle', 0.16, i * 0.11)); },
+  dead() { tone(320, 55, 0.7, 'sawtooth', 0.28); noise(0.3, 0.12, 0.1); },
+  start() { tone(440, 660, 0.12, 'square', 0.1); tone(660, 990, 0.14, 'square', 0.1, 0.1); },
+};
+
+// ---------- 画面レイアウト ----------
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const stat = document.createElement('canvas');                    // 部屋の静的レイヤー（床＋壁）＝部屋に入った時だけ描く
+const L = { w: 0, h: 0, dpr: 1, sat: 0, sab: 0, s: 1, ox: 0, oy: 0, topH: 0, botH: 0 };
+function readSafe() { const cs = getComputedStyle(document.getElementById('probe')); L.sat = parseFloat(cs.paddingTop) || 0; L.sab = parseFloat(cs.paddingBottom) || 0; }
+function layout() {
+  readSafe(); L.w = innerWidth; L.h = innerHeight; L.dpr = Math.min(3, devicePixelRatio || 1);
+  cv.width = Math.round(L.w * L.dpr); cv.height = Math.round(L.h * L.dpr); ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
+  L.topH = L.sat + 64; L.botH = L.sab + 70;
+  const ph = Math.max(200, L.h - L.topH - L.botH);
+  L.s = Math.min(L.w / RW, ph / RH); L.ox = (L.w - RW * L.s) / 2; L.oy = L.topH + (ph - RH * L.s) / 2;
+  renderStatic();
+}
+addEventListener('resize', layout); addEventListener('orientationchange', () => setTimeout(layout, 50));
+if (window.visualViewport) visualViewport.addEventListener('resize', layout);
+
+// ---------- ゲーム状態 ----------
+const G = { mode: 'title', seed: 0, rng: Math.random, floor: null, room: null, tiles: null, open: true, flow: new Int16Array(COLS * ROWS), flowT: 0,
+  kills: 0, time: 0, banner: null, shake: 0, portal: null, aim: null, overlayT: 0, roomsVisited: 0, deadT: 0 };
+const player = { x: RW / 2, y: RH / 2, r: 11, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, spd: TUNE.player.spd, moving: false, flash: 0 };
+let enemies = [], bullets = [], parts = [];
+
+// ---------- 生成器（部屋グリッド型）----------
+function key(x, y) { return x + ',' + y; }
+function genFloor(rng) {
+  const n = 3 + Math.floor(rng() * 3);                              // 部屋3〜5
+  const rooms = new Map(), list = [];
+  const add = (gx, gy, type) => { const r = { gx, gy, type, doors: {}, tpl: 0, fx: false, fy: false, cleared: false, visited: false, spawned: false, dist: -1 }; rooms.set(key(gx, gy), r); list.push(r); return r; };
+  const start = add(Math.floor(rng() * GRID), Math.floor(rng() * GRID), 'start');
+  let guard = 0;
+  while (list.length < n && guard++ < 500) {
+    const base = list[Math.floor(rng() * list.length)]; const ks = Object.keys(DIRS); const d = DIRS[ks[Math.floor(rng() * 4)]];
+    const nx = base.gx + d.dx, ny = base.gy + d.dy; if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID || rooms.has(key(nx, ny))) continue;
+    add(nx, ny, 'normal');
+  }
+  for (const r of list) for (const k in DIRS) { const d = DIRS[k]; if (rooms.has(key(r.gx + d.dx, r.gy + d.dy))) r.doors[k] = true; }
+  // 開始から最も遠い部屋＝出口
+  start.dist = 0; const q = [start];
+  while (q.length) { const r = q.shift(); for (const k in r.doors) { const d = DIRS[k]; const nb = rooms.get(key(r.gx + d.dx, r.gy + d.dy)); if (nb.dist < 0) { nb.dist = r.dist + 1; q.push(nb); } } }
+  let far = list.filter(r => r !== start); const md = Math.max.apply(null, far.map(r => r.dist)); far = far.filter(r => r.dist === md);
+  const exit = far[Math.floor(rng() * far.length)]; exit.type = 'exit';
+  for (const r of list) { if (r.type === 'normal') { r.tpl = 1 + Math.floor(rng() * (TPL.length - 1)); r.fx = rng() < 0.5; r.fy = rng() < 0.5; } }
+  return { rooms, list, start, exit, n: list.length };
+}
+function neighbor(room, dir) { const d = DIRS[dir]; return G.floor.rooms.get(key(room.gx + d.dx, room.gy + d.dy)); }
+function buildTiles(room) {
+  const t = new Uint8Array(COLS * ROWS);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) t[c + r * COLS] = 1;
+  for (const b of TPL[room.tpl]) {
+    let [c, r, w, h] = b; if (room.fx) c = 10 - c - w; if (room.fy) r = 16 - r - h;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) t[(c + 1 + i) + (r + 1 + j) * COLS] = 1;
+  }
+  if (room.doors.N) { t[5] = 2; t[6] = 2; }
+  if (room.doors.S) { t[5 + (ROWS - 1) * COLS] = 2; t[6 + (ROWS - 1) * COLS] = 2; }
+  if (room.doors.W) { t[8 * COLS] = 2; t[9 * COLS] = 2; }
+  if (room.doors.E) { t[(COLS - 1) + 8 * COLS] = 2; t[(COLS - 1) + 9 * COLS] = 2; }
+  return t;
+}
+function tileAt(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return 1; return G.tiles[c + r * COLS]; }
+function solidTile(c, r) { const t = tileAt(c, r); return t === 1 || (t === 2 && !G.open); }
+function solidAt(x, y) { return solidTile(Math.floor(x / TILE), Math.floor(y / TILE)); }
+function los(x0, y0, x1, y1) { const d = Math.hypot(x1 - x0, y1 - y0); const n = Math.max(1, Math.ceil(d / (TILE / 3))); for (let i = 1; i < n; i++) { if (solidAt(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n)) return false; } return true; }
+
+// ---------- 当たり（円 vs タイル）----------
+function resolveAxis(e, horiz) {
+  const c0 = Math.max(0, Math.floor((e.x - e.r) / TILE)), c1 = Math.min(COLS - 1, Math.floor((e.x + e.r) / TILE));
+  const r0 = Math.max(0, Math.floor((e.y - e.r) / TILE)), r1 = Math.min(ROWS - 1, Math.floor((e.y + e.r) / TILE));
+  let hit = false;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    if (!solidTile(c, r)) continue;
+    const tx0 = c * TILE, ty0 = r * TILE, tx1 = tx0 + TILE, ty1 = ty0 + TILE;
+    const cx = Math.max(tx0, Math.min(e.x, tx1)), cy = Math.max(ty0, Math.min(e.y, ty1));
+    const dx = e.x - cx, dy = e.y - cy;
+    if (dx * dx + dy * dy >= e.r * e.r - 1e-6) continue;
+    hit = true;
+    const inX = e.x > tx0 && e.x < tx1, inY = e.y > ty0 && e.y < ty1;
+    if (inX && inY) { if (horiz) e.x = (e.x < tx0 + TILE / 2) ? tx0 - e.r : tx1 + e.r; else e.y = (e.y < ty0 + TILE / 2) ? ty0 - e.r : ty1 + e.r; }  // 中心がタイル内＝移動軸で押し出す
+    else if (inX) { e.y = dy < 0 ? ty0 - e.r : ty1 + e.r; }                                   // 上下の辺に接触
+    else if (inY) { e.x = dx < 0 ? tx0 - e.r : tx1 + e.r; }                                   // 左右の辺に接触
+    else { const d = Math.sqrt(dx * dx + dy * dy) || 0.0001; const push = e.r - d; e.x += dx / d * push; e.y += dy / d * push; }  // 角＝角から離す（滑って抜ける）
+  }
+  return hit;
+}
+function moveCircle(e, dx, dy) { let hit = false; e.x += dx; if (resolveAxis(e, true)) hit = true; e.y += dy; if (resolveAxis(e, false)) hit = true; e.x = Math.max(e.r, Math.min(RW - e.r, e.x)); e.y = Math.max(e.r, Math.min(RH - e.r, e.y)); return hit; }
+
+// ---------- 流れ場（敵の経路）----------
+function computeFlow() {
+  const F = G.flow; F.fill(-1); const pc = Math.max(0, Math.min(COLS - 1, Math.floor(player.x / TILE))), pr = Math.max(0, Math.min(ROWS - 1, Math.floor(player.y / TILE)));
+  const q = [pc + pr * COLS]; F[q[0]] = 0; let h = 0;
+  while (h < q.length) { const i = q[h++]; const c = i % COLS, r = (i / COLS) | 0; const nb = [[c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]];
+    for (const [nc, nr] of nb) { if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS || solidTile(nc, nr)) continue; const j = nc + nr * COLS; if (F[j] < 0) { F[j] = F[i] + 1; q.push(j); } } }
+}
+function flowDir(e) {
+  const F = G.flow; const c = Math.max(0, Math.min(COLS - 1, Math.floor(e.x / TILE))), r = Math.max(0, Math.min(ROWS - 1, Math.floor(e.y / TILE)));
+  let bd = F[c + r * COLS]; if (bd < 0) return null; let best = null;
+  const cand = [[c + 1, r], [c - 1, r], [c, r + 1], [c, r - 1]];
+  const ok = (a, b) => a >= 0 && b >= 0 && a < COLS && b < ROWS && !solidTile(a, b);
+  for (const [dc, dr] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) if (ok(c + dc, r) && ok(c, r + dr) && ok(c + dc, r + dr)) cand.push([c + dc, r + dr]);
+  for (const [nc, nr] of cand) { if (!ok(nc, nr)) continue; const v = F[nc + nr * COLS]; if (v >= 0 && v < bd) { bd = v; best = [nc, nr]; } }
+  if (!best) return null;
+  const tx = best[0] * TILE + TILE / 2, ty = best[1] * TILE + TILE / 2; const d = Math.hypot(tx - e.x, ty - e.y) || 1; return { x: (tx - e.x) / d, y: (ty - e.y) / d };
 }
 
-// ---------- スプライト（ドット絵を drawImage する負荷を模す） ----------
-function sprite(size, c1, c2){ const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'); g.fillStyle = c1; g.fillRect(1, 1, size - 2, size - 2); g.fillStyle = c2; const t = Math.floor(size / 3); g.fillRect(t, t, Math.ceil(size / 3), Math.ceil(size / 3)); return c; }
-const SPR = { enemy: sprite(12, '#ff3d81', '#ffd1e0'), player: sprite(12, '#00e5ff', '#ffffff'), bullet: sprite(4, '#fff36b', '#fff36b') };
+// ---------- 演出 ----------
+function burst(x, y, col, n, spd, life, size) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (0.4 + Math.random() * 0.8); parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, col, size: size || 3 }); } }
+function banner(text, t) { G.banner = { text, t: t || 1.2, max: t || 1.2 }; }
 
-// ---------- ワールド（敵が主人公へ寄る／止まると最寄りの敵へ自動射撃） ----------
-function makeWorld(canvas, opts){
-  const W = { canvas, ctx: canvas.getContext('2d', { alpha: false }), enemies: [], bullets: [], player: { x: 0, y: 0, vx: 0, vy: 0 },
-              w: 0, h: 0, scale: 1, lowRes: true, n: 50, t: 0, bot: !!opts.bot, fireAcc: 0, input: { x: 0, y: 0 }, moving: false, kills: 0 };
-  function spawn(){ const side = (Math.random() * 4) | 0, m = 10; let x, y;
-    if (side === 0) { x = Math.random() * W.w; y = -m; } else if (side === 1) { x = W.w + m; y = Math.random() * W.h; }
-    else if (side === 2) { x = Math.random() * W.w; y = W.h + m; } else { x = -m; y = Math.random() * W.h; }
-    return { x, y, spd: 20 + Math.random() * 30 }; }
-  W.setN = function(n){ W.n = n; while (W.enemies.length < n) W.enemies.push(spawn()); W.enemies.length = n; };
-  W.cw = 0; W.ch = 0;
-  W.resize = function(){ const cw = canvas.clientWidth > 0 ? canvas.clientWidth : (innerWidth > 0 ? innerWidth : 375);
-    const ch = canvas.clientHeight > 0 ? canvas.clientHeight : (innerHeight > 0 ? innerHeight - 90 : 667);
-    W.cw = cw; W.ch = ch;
-    if (W.lowRes) { W.w = 360; W.h = Math.max(200, Math.round(360 * ch / cw)); W.scale = 1; }
-    else { W.w = Math.round(cw * devicePixelRatio); W.h = Math.round(ch * devicePixelRatio); W.scale = Math.max(1, Math.round(devicePixelRatio * 3)); }
-    if (!(W.w > 0)) W.w = 360; if (!(W.h > 0)) W.h = 640;
-    canvas.width = W.w; canvas.height = W.h; W.ctx.imageSmoothingEnabled = false;
-    W.player.x = W.w / 2; W.player.y = W.h / 2; W.enemies.length = 0; W.bullets.length = 0; W.setN(W.n); };
-  W.checkSize = function(){ const cw = canvas.clientWidth, ch = canvas.clientHeight; if (cw > 0 && ch > 0 && (cw !== W.cw || ch !== W.ch)) W.resize(); };
-  W.step = function(dt){ const p = W.player, s = W.scale; W.t += dt;
-    if (W.bot) { W.moving = Math.sin(W.t * 0.5) > 0.3; p.vx = W.moving ? Math.cos(W.t * 0.9) * 40 * s : 0; p.vy = W.moving ? Math.sin(W.t * 1.3) * 40 * s : 0; }
-    else { p.vx = W.input.x * 90 * s; p.vy = W.input.y * 90 * s; W.moving = (W.input.x !== 0 || W.input.y !== 0); }
-    p.x = Math.max(6 * s, Math.min(W.w - 6 * s, p.x + p.vx * dt)); p.y = Math.max(6 * s, Math.min(W.h - 6 * s, p.y + p.vy * dt));
-    for (const e of W.enemies) { const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy) || 1; e.x += dx / d * e.spd * s * dt; e.y += dy / d * e.spd * s * dt; if (d < 14 * s) Object.assign(e, spawn()); }
-    W.fireAcc += dt;
-    if (!W.moving && W.fireAcc > 0.08) { W.fireAcc = 0; let best = null, bd = 1e18;
-      for (const e of W.enemies) { const d = (e.x - p.x) * (e.x - p.x) + (e.y - p.y) * (e.y - p.y); if (d < bd) { bd = d; best = e; } }
-      if (best) { const dx = best.x - p.x, dy = best.y - p.y, d = Math.hypot(dx, dy) || 1; W.bullets.push({ x: p.x, y: p.y, vx: dx / d * 260 * s, vy: dy / d * 260 * s, life: 1.2 }); } }
-    for (let i = W.bullets.length - 1; i >= 0; i--) { const b = W.bullets[i]; b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; let hit = false;
-      for (const e of W.enemies) { if (Math.abs(e.x - b.x) < 7 * s && Math.abs(e.y - b.y) < 7 * s) { Object.assign(e, spawn()); hit = true; W.kills++; break; } }
-      if (hit || b.life <= 0 || b.x < 0 || b.y < 0 || b.x > W.w || b.y > W.h) W.bullets.splice(i, 1); } };
-  W.draw = function(){ const g = W.ctx, s = W.scale; g.fillStyle = '#0b0f1a'; g.fillRect(0, 0, W.w, W.h);
-    g.fillStyle = '#141c33'; for (let x = 0; x < W.w; x += 24 * s) g.fillRect(x, 0, 1, W.h); for (let y = 0; y < W.h; y += 24 * s) g.fillRect(0, y, W.w, 1);
-    for (const e of W.enemies) g.drawImage(SPR.enemy, e.x - 6 * s, e.y - 6 * s, 12 * s, 12 * s);
-    for (const b of W.bullets) g.drawImage(SPR.bullet, b.x - 2 * s, b.y - 2 * s, 4 * s, 4 * s);
-    const p = W.player; g.drawImage(SPR.player, p.x - 6 * s, p.y - 6 * s, 12 * s, 12 * s);
-    if (!W.moving) { g.strokeStyle = '#00e5ff'; g.lineWidth = s; g.strokeRect(p.x - 9 * s, p.y - 9 * s, 18 * s, 18 * s); } };
-  return W;
+// ---------- ラン・部屋 ----------
+function newRun() {
+  G.seed = ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0); G.rng = mulberry32(G.seed); G.floor = genFloor(G.rng);
+  G.kills = 0; G.time = 0; G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; G.roomsVisited = 0; parts = [];
+  Object.assign(player, { x: RW / 2, y: RH / 2, hp: player.maxHp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0 });
+  G.mode = 'run'; enterRoom(G.floor.start, null); SFX.start();
 }
+function enterRoom(room, fromDir) {
+  G.room = room; G.tiles = buildTiles(room); enemies = []; bullets = []; G.portal = null; G.aim = null;
+  if (!room.visited) { room.visited = true; G.roomsVisited++; }
+  if (fromDir === 'N') { player.x = RW / 2; player.y = TILE * 1.7; } else if (fromDir === 'S') { player.x = RW / 2; player.y = RH - TILE * 1.7; }
+  else if (fromDir === 'W') { player.x = TILE * 1.7; player.y = RH / 2; } else if (fromDir === 'E') { player.x = RW - TILE * 1.7; player.y = RH / 2; } else { player.x = RW / 2; player.y = RH / 2; }
+  if (!room.cleared && room.type !== 'start') { G.open = false; room.spawned = true; spawnEnemies(room); }
+  else { G.open = true; room.cleared = true; if (room.type === 'exit') { G.portal = { x: RW / 2, y: RH / 2, t: 0 }; } }
+  computeFlow(); G.flowT = 0; renderStatic();
+  banner(room.type === 'start' ? 'START' : room.type === 'exit' ? 'EXIT ROOM' : 'ROOM ' + G.roomsVisited, 1.0);
+}
+function spawnEnemies(room) {
+  const order = G.roomsVisited; const n = Math.min(TUNE.room.max, TUNE.room.base + Math.floor(G.rng() * TUNE.room.rand) + (order >= TUNE.room.bonusFrom ? 1 : 0));
+  const cells = [];
+  for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) { if (G.tiles[c + r * COLS] !== 0) continue; const x = c * TILE + TILE / 2, y = r * TILE + TILE / 2; if (Math.hypot(x - player.x, y - player.y) < TUNE.room.spawnDist) continue; cells.push([x, y]); }
+  for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(G.rng() * (i + 1)); const t = cells[i]; cells[i] = cells[j]; cells[j] = t; }
+  for (let i = 0; i < n && i < cells.length; i++) {
+    const type = (i === 0) ? 'rusher' : (i === 1) ? 'shooter' : (G.rng() < 0.6 ? 'rusher' : 'shooter');
+    const [x, y] = cells[i];
+    enemies.push(type === 'rusher'
+      ? { type, x, y, r: 13, hp: TUNE.rusher.hp, maxHp: TUNE.rusher.hp, st: 'spawn', t: 0.8 + i * 0.12, dx: 0, dy: 0, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 }
+      : { type, x, y, r: 12, hp: TUNE.shooter.hp, maxHp: TUNE.shooter.hp, st: 'spawn', t: 0.8 + i * 0.12, ax: x, ay: y, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 });
+  }
+  SFX.spawn();
+}
+function clearRoom() {
+  G.room.cleared = true; G.open = true; SFX.door(); banner('CLEARED', 0.9);
+  if (G.room.type === 'exit') { G.portal = { x: RW / 2, y: RH / 2, t: 0 }; SFX.portal(); }
+  computeFlow();
+}
+function floorClear() { G.mode = 'clear'; G.overlayT = 0; S.runs++; S.clears++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.clear(); burst(player.x, player.y, COL.portal, 40, 180, 0.9, 3); }
+function die() { player.alive = false; G.mode = 'dead'; G.overlayT = 0; G.deadT = 0; S.runs++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.dead(); burst(player.x, player.y, COL.player, 50, 220, 1.1, 3); G.shake = 8; }
+function hurt(n) { if (!player.alive || player.inv > 0 || PR.god) return; player.hp -= n; player.inv = TUNE.player.inv; player.flash = 0.15; G.shake = 5; SFX.hurt(); burst(player.x, player.y, COL.hp, 10, 120, 0.4, 2); if (player.hp <= 0) { player.hp = 0; die(); } }
 
-// ---------- ① 描画性能 ----------
-const W1 = makeWorld($('c1'), { bot: true });
-let raf1 = 0, last1 = 0, frames = 0, secStart = 0, fpsHist = [], autoRun = null;
-function fpsLabel(){ return '敵 ' + W1.n + ' / ' + (W1.lowRes ? '低解像度 ' : '高解像度 ') + W1.w + '×' + W1.h + (fpsHist.length ? ' / 直近最小 ' + Math.min.apply(null, fpsHist) : ''); }
-// FPS は実時間（1秒以上の実経過）で数える。dt の上限（0.05秒）はシミュレーション用で、計測には使わない＝遅い端末ほど高く出る誤りを防ぐ。
-function loop1(t){ raf1 = requestAnimationFrame(loop1); const dt = Math.min(0.05, (t - last1) / 1000) || 0.016; last1 = t; W1.step(dt); W1.draw(); frames++;
-  const el = t - secStart;
-  if (el >= 1000) { const fps = Math.round(frames * 1000 / el); fpsHist.push(fps); if (fpsHist.length > 10) fpsHist.shift(); frames = 0; secStart = t; $('fps').textContent = fps; $('fpsinfo').textContent = fpsLabel(); if (autoRun) autoRun.tick(fps); else W1.checkSize(); } }
-function startFps(){ if (raf1) return; W1.resize(); last1 = performance.now(); secStart = last1; frames = 0; fpsHist = []; $('fpsinfo').textContent = fpsLabel(); raf1 = requestAnimationFrame(loop1); }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && autoRun) { autoRun = null; $('autoMsg').textContent = '画面が隠れたため自動計測を中断しました。もう一度「自動計測」を押してください。'; } });
-function stopFps(){ if (raf1) { cancelAnimationFrame(raf1); raf1 = 0; } }
-function setNButtons(n){ document.querySelectorAll('#s1 .ctl button[data-n]').forEach(x => x.classList.toggle('on', +x.dataset.n === n)); }
-document.querySelectorAll('#s1 .ctl button[data-n]').forEach(b => b.addEventListener('click', () => { W1.setN(+b.dataset.n); setNButtons(+b.dataset.n); fpsHist = []; }));
-$('resTgl').addEventListener('click', () => { W1.lowRes = !W1.lowRes; $('resTgl').textContent = W1.lowRes ? '低解像度' : '高解像度'; W1.resize(); fpsHist = []; $('fpsinfo').textContent = fpsLabel(); });
-$('auto').addEventListener('click', () => { if (autoRun) return; const plan = [50, 100, 200]; let i = 0, samples = [], warm = 2; const mode = W1.lowRes ? '低' : '高'; const msg = $('autoMsg');
-  function stage(){ W1.setN(plan[i]); setNButtons(plan[i]); samples = []; warm = 2; msg.textContent = '自動計測中: 敵 ' + plan[i] + '（' + mode + '解像度）… 画面に触れずに待ってください'; }
-  stage();
-  autoRun = { tick(fps){ if (warm > 0) { warm--; return; } samples.push(fps);
-    if (samples.length >= 6) { const avg = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length), min = Math.min.apply(null, samples);
-      R.fps = R.fps.filter(r => !(r.mode === mode && r.n === plan[i])); R.fps.push({ mode, n: plan[i], avg, min, res: W1.w + '×' + W1.h }); saveR(); i++;
-      if (i < plan.length) stage(); else { autoRun = null; msg.textContent = '自動計測 完了（' + mode + '解像度）: ' + R.fps.filter(r => r.mode === mode).map(r => r.n + '体 平均' + r.avg + '/最小' + r.min).join(' ／ ') + ' → もう一方の解像度でも実行 → ⑤結果へ'; } } } }; });
-
-// ---------- ② タッチ遅延・ジェスチャ干渉 ----------
-const W2 = makeWorld($('c2'), { bot: false });
-const c2 = $('c2');
-let raf2 = 0, last2 = 0, pendIn = 0, pendQ = 0, latS = [], evT = [];
+// ---------- 入力 ----------
 const stick = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0 };
-const flags = { zoom: false, scroll: false, select: false, ctx: false };
-function tPos(t){ const r = c2.getBoundingClientRect(); return { x: t.clientX - r.left, y: t.clientY - r.top }; }
-function markIn(e){ const now = performance.now(); pendIn = now; pendQ = (e.timeStamp > 0 && e.timeStamp < now && now - e.timeStamp < 1000) ? now - e.timeStamp : 0; evT.push(now); if (evT.length > 60) evT.shift(); }
-c2.addEventListener('touchstart', e => { e.preventDefault(); const t = e.changedTouches[0]; const p = tPos(t); stick.on = true; stick.id = t.identifier; stick.ox = p.x; stick.oy = p.y; stick.x = p.x; stick.y = p.y; markIn(e); }, { passive: false });
-c2.addEventListener('touchmove', e => { e.preventDefault(); for (const t of e.changedTouches) { if (t.identifier === stick.id) { const p = tPos(t); stick.x = p.x; stick.y = p.y; } } markIn(e); }, { passive: false });
-function endT(e){ e.preventDefault(); for (const t of e.changedTouches) { if (t.identifier === stick.id) { stick.on = false; stick.id = null; } } markIn(e); }
-c2.addEventListener('touchend', endT, { passive: false }); c2.addEventListener('touchcancel', endT, { passive: false });
-c2.addEventListener('mousedown', e => { stick.on = true; stick.ox = e.offsetX; stick.oy = e.offsetY; stick.x = e.offsetX; stick.y = e.offsetY; markIn(e); });
-c2.addEventListener('mousemove', e => { if (!stick.on) return; stick.x = e.offsetX; stick.y = e.offsetY; markIn(e); });
-addEventListener('mouseup', e => { if (stick.on) { stick.on = false; markIn(e); } });
-function drawStick(){ if (!stick.on) return; const g = W2.ctx, k = W2.w / (c2.clientWidth || 1); g.strokeStyle = 'rgba(0,229,255,.6)'; g.lineWidth = 2 * k; g.beginPath(); g.arc(stick.ox * k, stick.oy * k, 48 * k, 0, 6.2832); g.stroke(); g.fillStyle = 'rgba(0,229,255,.5)'; g.beginPath(); g.arc(stick.x * k, stick.y * k, 16 * k, 0, 6.2832); g.fill(); }
-let f2 = 0;
-function loop2(t){ raf2 = requestAnimationFrame(loop2); const dt = Math.min(0.05, (t - last2) / 1000) || 0.016; last2 = t; if (++f2 % 60 === 0) W2.checkSize();
-  if (stick.on) { const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy), dead = 8, max = 48;
-    if (d < dead) { W2.input.x = 0; W2.input.y = 0; } else { const k = Math.min(1, (d - dead) / (max - dead)); W2.input.x = dx / d * k; W2.input.y = dy / d * k; } }
-  else { W2.input.x = 0; W2.input.y = 0; }
-  W2.step(dt); W2.draw(); drawStick();
-  if (pendIn) { const lat = performance.now() - pendIn + pendQ; latS.push(lat); if (latS.length > 200) latS.shift(); pendIn = 0; pendQ = 0;
-    const avg = latS.reduce((a, b) => a + b, 0) / latS.length, max = Math.max.apply(null, latS); let hz = 0;
-    if (evT.length > 5) hz = Math.round((evT.length - 1) * 1000 / (evT[evT.length - 1] - evT[0]));
-    $('lat').textContent = lat.toFixed(1); $('latinfo').textContent = '平均 ' + avg.toFixed(1) + ' / 最大 ' + max.toFixed(1) + ' ms / ' + hz + ' Hz / n=' + latS.length;
-    R.lat = { avg: +avg.toFixed(1), max: +max.toFixed(1), hz, n: latS.length }; if (latS.length % 20 === 0) saveR(); } }
-function startTouch(){ if (raf2) return; W2.lowRes = true; W2.n = 50; W2.resize(); last2 = performance.now(); raf2 = requestAnimationFrame(loop2); }
-function stopTouch(){ if (raf2) { cancelAnimationFrame(raf2); raf2 = 0; } }
-$('latReset').addEventListener('click', () => { latS = []; evT = []; R.lat = {}; saveR(); $('lat').textContent = '--'; $('latinfo').textContent = '左半分に指を置いて動かす'; });
-function upFlags(){ const l = []; if (flags.zoom) l.push('拡大'); if (flags.scroll) l.push('スクロール'); if (flags.select) l.push('文字選択'); if (flags.ctx) l.push('長押しメニュー'); $('gflags').textContent = '自動検知: ' + (l.length ? l.join('・') + ' が起きた' : 'なし'); R.gestures.auto = Object.assign({}, flags); saveR(); }
-if (window.visualViewport) visualViewport.addEventListener('resize', () => { if (Math.abs(visualViewport.scale - 1) > 0.01) { flags.zoom = true; upFlags(); } });
-addEventListener('scroll', () => { if (scrollY > 0 || scrollX > 0) { flags.scroll = true; upFlags(); } });
-document.addEventListener('selectionchange', () => { const s = document.getSelection(); if (s && s.toString().length > 0 && document.activeElement !== $('out')) { flags.select = true; upFlags(); } });
-document.addEventListener('contextmenu', () => { flags.ctx = true; upFlags(); });
-const GITEMS = [['back', '左端から右へスワイプで「戻って」しまった？'], ['pull', '上から下へ引っ張ると画面が動いた／更新された？'], ['long', 'キャラを長押しで選択やメニューが出た？'], ['dbl', '素早く2回タップで拡大した？']];
-$('gchk').addEventListener('click', () => { const p = $('gpanel'); const show = p.style.display === 'none'; p.style.display = show ? 'block' : 'none'; if (show) chkList(p, 'gestures', GITEMS, 'ジェスチャの邪魔（試してから押す）'); });
+const keys = {}; const inp = { x: 0, y: 0, mag: 0 };
+const BTN = { sound: { x: 0, y: 0, w: 44, h: 38 }, pause: { x: 0, y: 0, w: 44, h: 38 } };
+function layoutButtons() { BTN.pause.x = L.w - 8 - 44; BTN.pause.y = L.sat + 8; BTN.sound.x = L.w - 8 - 44 - 6 - 44; BTN.sound.y = L.sat + 8; }
+function inBtn(b, p) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
+const MENU = [];  // 一時停止メニューの行（描画時に座標を入れる）
+function press(p) {
+  au();
+  if (G.mode === 'run') {
+    if (inBtn(BTN.sound, p)) { setSound(!S.sound); return true; }
+    if (inBtn(BTN.pause, p)) { G.mode = 'pause'; stick.on = false; return true; }
+    return false;
+  }
+  if (G.mode === 'title') { newRun(); return true; }
+  if (G.mode === 'pause') {
+    for (const m of MENU) if (p.x >= m.x && p.x <= m.x + m.w && p.y >= m.y && p.y <= m.y + m.h) { m.act(); return true; }
+    return true;
+  }
+  if (G.mode === 'dead' || G.mode === 'clear') { if (G.overlayT > 0.7) newRun(); return true; }
+  return true;
+}
+function tStart(e) { e.preventDefault(); for (const t of e.changedTouches) { const p = { x: t.clientX, y: t.clientY }; if (press(p)) continue; if (!stick.on) { stick.on = true; stick.id = t.identifier; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; } } }
+function tMove(e) { e.preventDefault(); for (const t of e.changedTouches) if (stick.on && t.identifier === stick.id) { stick.x = t.clientX; stick.y = t.clientY; } }
+function tEnd(e) { e.preventDefault(); for (const t of e.changedTouches) if (stick.on && t.identifier === stick.id) { stick.on = false; stick.id = null; } }
+cv.addEventListener('touchstart', tStart, { passive: false }); cv.addEventListener('touchmove', tMove, { passive: false });
+cv.addEventListener('touchend', tEnd, { passive: false }); cv.addEventListener('touchcancel', tEnd, { passive: false });
+cv.addEventListener('mousedown', e => { const p = { x: e.clientX, y: e.clientY }; if (press(p)) return; stick.on = true; stick.id = 'm'; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; });
+addEventListener('mousemove', e => { if (stick.on && stick.id === 'm') { stick.x = e.clientX; stick.y = e.clientY; } });
+addEventListener('mouseup', () => { if (stick.id === 'm') { stick.on = false; stick.id = null; } });
+addEventListener('keydown', e => { keys[e.key] = true; if (e.key === 'Escape' && G.mode === 'run') G.mode = 'pause'; else if (e.key === 'Escape' && G.mode === 'pause') G.mode = 'run'; if ((e.key === ' ' || e.key === 'Enter') && G.mode !== 'run' && G.mode !== 'pause') press({ x: -1, y: -1 }); });
+addEventListener('keyup', e => { keys[e.key] = false; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { if (G.mode === 'run') G.mode = 'pause'; stick.on = false; } else { last = performance.now(); au(); } });
+function readInput() {
+  let x = 0, y = 0;
+  if (stick.on) { const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy), dead = 8, max = 48; if (d >= dead) { const k = Math.min(1, (d - dead) / (max - dead)); x = dx / d * k; y = dy / d * k; } }
+  else { if (keys.ArrowLeft || keys.a) x -= 1; if (keys.ArrowRight || keys.d) x += 1; if (keys.ArrowUp || keys.w) y -= 1; if (keys.ArrowDown || keys.s) y += 1; const d = Math.hypot(x, y); if (d > 1) { x /= d; y /= d; } }
+  if (PR.forced) { x = PR.forced.x; y = PR.forced.y; }
+  inp.x = x; inp.y = y; inp.mag = Math.hypot(x, y);
+}
 
-// ---------- ③ 保存 ----------
-function idb(){ return new Promise((res, rej) => { const r = indexedDB.open('pr0', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
-async function idbGet(k){ const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readonly').objectStore('kv').get(k); t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error); }); }
-async function idbSet(k, v){ const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
-async function idbDel(k){ const d = await idb(); return new Promise((res, rej) => { const t = d.transaction('kv', 'readwrite'); t.objectStore('kv').delete(k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
-function fmtEl(ms){ if (ms < 60000) return Math.round(ms / 1000) + '秒'; if (ms < 3600000) return Math.round(ms / 60000) + '分'; if (ms < 86400000) return (ms / 3600000).toFixed(1) + '時間'; return (ms / 86400000).toFixed(1) + '日'; }
-function fill(p, v){ if (!v || v.err) { $(p + '_id').textContent = (v && v.err) ? 'エラー' : 'なし'; $(p + '_at').textContent = '-'; $(p + '_el').textContent = '-'; $(p + '_dm').textContent = '-'; return; }
-  $(p + '_id').textContent = v.id; $(p + '_at').textContent = v.at.replace('T', ' '); $(p + '_el').textContent = fmtEl(Date.now() - Date.parse(v.at)); $(p + '_dm').textContent = v.dm; }
-async function refreshStorage(){ $('dm3').textContent = displayMode(); let ls = null; try { ls = JSON.parse(localStorage.getItem('pr0_save') || 'null'); } catch (e) { ls = { err: String(e) }; } fill('ls', ls);
-  let ib = null; try { ib = await idbGet('save'); } catch (e) { ib = { err: String(e) }; } fill('idb', ib);
-  try { if (navigator.storage && navigator.storage.persisted) { const p = await navigator.storage.persisted(); $('persist').textContent = p ? '永続' : '未永続'; } else $('persist').textContent = 'API非対応'; } catch (e) { $('persist').textContent = '不明'; }
-  try { if (navigator.storage && navigator.storage.estimate) { const q = await navigator.storage.estimate(); $('quota').textContent = Math.round((q.usage || 0) / 1024) + 'KB / 上限 ' + Math.round((q.quota || 0) / 1048576) + 'MB'; } } catch (e) {}
-  R.storage.ls = ls; R.storage.idb = ib; R.storage.mode = displayMode(); saveR(); }
-$('wsave').addEventListener('click', async () => { const v = { id: Math.random().toString(36).slice(2, 8).toUpperCase(), at: nowStr(), dm: displayMode() };
-  try { localStorage.setItem('pr0_save', JSON.stringify(v)); } catch (e) {} try { await idbSet('save', v); } catch (e) {}
-  try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {} refreshStorage(); });
-$('wclear').addEventListener('click', async () => { try { localStorage.removeItem('pr0_save'); } catch (e) {} try { await idbDel('save'); } catch (e) {} refreshStorage(); });
-const STITEMS = [['relaunch', '閉じて開き直したらIDが残った？'], ['reboot', '端末を再起動してもIDが残った？'], ['offline', '機内モードで起動できた？'], ['separate', 'Safariタブ版とホーム画面版で保存が別だった？']];
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-  navigator.serviceWorker.register('./sw.js').then(() => { $('swst').textContent = navigator.serviceWorker.controller ? '登録済み・制御中（オフライン起動の準備あり）' : '登録済み（次回起動から有効）'; R.storage.sw = navigator.serviceWorker.controller ? 'controlling' : 'registered'; })
-    .catch(e => { $('swst').textContent = '登録失敗: ' + e; R.storage.sw = 'error: ' + e; });
-} else { $('swst').textContent = '未登録（' + location.protocol + ' では使えない）'; R.storage.sw = 'n/a ' + location.protocol; }
+// ---------- 更新 ----------
+function update(dt) {
+  G.time += dt; readInput();
+  if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
+  if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
+  // 主人公
+  player.inv -= dt; player.fireT -= dt; player.flash -= dt;
+  player.moving = inp.mag > 0.001;
+  if (player.moving) { moveCircle(player, inp.x * player.spd * dt, inp.y * player.spd * dt); player.ang = Math.atan2(inp.y, inp.x); }
+  // ドア通過
+  const pc = Math.floor(player.x / TILE), pr = Math.floor(player.y / TILE);
+  if (G.tiles[pc + pr * COLS] === 2 && G.open) { const dir = pr === 0 ? 'N' : pr === ROWS - 1 ? 'S' : pc === 0 ? 'W' : 'E'; const nb = neighbor(G.room, dir); if (nb) { enterRoom(nb, OPP[dir]); return; } }
+  // 流れ場
+  G.flowT -= dt; if (G.flowT <= 0) { computeFlow(); G.flowT = 0.12; }
+  // 自動照準・射撃（止まっている時だけ）
+  G.aim = null;
+  if (!player.moving) {
+    let best = null, bd = TUNE.player.range;
+    for (const e of enemies) { if (e.st === 'spawn') continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < bd && los(player.x, player.y, e.x, e.y)) { bd = d; best = e; } }
+    if (best) { G.aim = best; player.ang = Math.atan2(best.y - player.y, best.x - player.x);
+      if (player.fireT <= 0) { player.fireT = TUNE.player.fireRate; const a = player.ang + (Math.random() - 0.5) * 0.06; bullets.push({ x: player.x + Math.cos(a) * 14, y: player.y + Math.sin(a) * 14, vx: Math.cos(a) * TUNE.player.bulletSpd, vy: Math.sin(a) * TUNE.player.bulletSpd, r: 3, from: 'p', life: 1.2 }); SFX.shot(); parts.push({ x: player.x + Math.cos(a) * 16, y: player.y + Math.sin(a) * 16, vx: 0, vy: 0, life: 0.05, max: 0.05, col: COL.white, size: 5 }); } }
+  }
+  // 敵
+  for (const e of enemies) updateEnemy(e, dt);
+  for (let i = 0; i < enemies.length; i++) for (let j = i + 1; j < enemies.length; j++) { const a = enemies[i], b = enemies[j]; if (a.st === 'spawn' || b.st === 'spawn') continue; const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), m = a.r + b.r; if (d > 0 && d < m) { const p = (m - d) / 2, nx = dx / d, ny = dy / d; moveCircle(a, -nx * p, -ny * p); moveCircle(b, nx * p, ny * p); } }
+  for (const e of enemies) { if (e.st === 'spawn') continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < e.r + player.r) { hurt(1); const nx = (player.x - e.x) / (d || 1), ny = (player.y - e.y) / (d || 1); moveCircle(player, nx * 6, ny * 6); } }
+  // 弾
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i]; b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.life <= 0 || solidAt(b.x, b.y)) { burst(b.x, b.y, b.from === 'p' ? COL.pbullet : COL.ebullet, 3, 60, 0.2, 2); bullets.splice(i, 1); continue; }
+    if (b.from === 'p') {
+      for (let k = enemies.length - 1; k >= 0; k--) { const e = enemies[k]; if (e.st === 'spawn') continue; if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.r) {
+        e.hp -= 1; e.flash = 0.08; moveCircle(e, b.vx * 0.012, b.vy * 0.012); burst(b.x, b.y, COL.white, 4, 90, 0.2, 2); SFX.hit(); bullets.splice(i, 1);
+        if (e.hp <= 0) { enemies.splice(k, 1); G.kills++; burst(e.x, e.y, e.type === 'rusher' ? COL.rusher : COL.shooter, 16, 160, 0.6, 3); SFX.kill(); }
+        break; } }
+    } else if (player.alive && Math.hypot(player.x - b.x, player.y - b.y) < player.r + b.r) { bullets.splice(i, 1); hurt(1); }
+  }
+  // 部屋クリア・出口
+  if (!G.room.cleared && G.room.spawned && enemies.length === 0) clearRoom();
+  if (G.portal) { G.portal.t += dt; if (Math.hypot(player.x - G.portal.x, player.y - G.portal.y) < 22) { floorClear(); return; } }
+  updateFx(dt);
+}
+function updateEnemy(e, dt) {
+  e.flash -= dt; const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 1;
+  const see = () => los(e.x, e.y, player.x, player.y);
+  const walk = (spd, prefer) => { let v = null; if (e.nudgeT > 0) { e.nudgeT -= dt; v = { x: Math.cos(e.nudge), y: Math.sin(e.nudge) }; } else if (prefer && see()) v = { x: dx / d, y: dy / d }; else v = flowDir(e) || { x: dx / d, y: dy / d }; moveCircle(e, v.x * spd * dt, v.y * spd * dt); e.face = Math.atan2(v.y, v.x); };
+  if (e.st === 'chase' || e.st === 'move') { e.stuckT += dt; if (e.stuckT >= 1.5) { if (Math.hypot(e.x - e.sx, e.y - e.sy) < 6) { e.nudge = Math.random() * Math.PI * 2; e.nudgeT = 0.5; } e.sx = e.x; e.sy = e.y; e.stuckT = 0; } }
+  if (e.type === 'rusher') {
+    switch (e.st) {
+      case 'spawn': e.t -= dt; if (e.t <= 0) { e.st = 'chase'; } break;
+      case 'chase': if (d < TUNE.rusher.tellDist && see()) { e.st = 'tell'; e.t = TUNE.rusher.tellT; SFX.tell(); } else walk(TUNE.rusher.spd, true); break;
+      case 'tell': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t <= 0) { e.dx = dx / d; e.dy = dy / d; e.st = 'dash'; e.t = TUNE.rusher.dashT; SFX.dash(); } break;
+      case 'dash': e.t -= dt; { const hit = moveCircle(e, e.dx * TUNE.rusher.dashSpd * dt, e.dy * TUNE.rusher.dashSpd * dt); if (hit) { e.t = Math.min(e.t, 0.05); } } if (e.t <= 0) { e.st = 'rest'; e.t = TUNE.rusher.restT; } break;
+      case 'rest': e.t -= dt; if (e.t <= 0) e.st = 'chase'; break;
+    }
+  } else {
+    switch (e.st) {
+      case 'spawn': e.t -= dt; if (e.t <= 0) { e.st = 'move'; } break;
+      case 'move': if (see()) { if (d < TUNE.shooter.near) { moveCircle(e, -dx / d * TUNE.shooter.spd * dt, -dy / d * TUNE.shooter.spd * dt); e.face = Math.atan2(dy, dx); } else if (d < TUNE.shooter.far) { e.st = 'aim'; e.t = TUNE.shooter.aimT; e.ax = player.x; e.ay = player.y; SFX.tell(); } else walk(TUNE.shooter.spd, true); } else walk(TUNE.shooter.spd, false); break;
+      case 'aim': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t > TUNE.shooter.lockT) { e.ax = player.x; e.ay = player.y; }
+        if (e.t <= 0) { const a = Math.atan2(e.ay - e.y, e.ax - e.x); bullets.push({ x: e.x + Math.cos(a) * 14, y: e.y + Math.sin(a) * 14, vx: Math.cos(a) * TUNE.shooter.bulletSpd, vy: Math.sin(a) * TUNE.shooter.bulletSpd, r: 5, from: 'e', life: 4 }); SFX.eshot(); e.st = 'cool'; e.t = TUNE.shooter.coolT; } break;
+      case 'cool': e.t -= dt; { const sx = -dy / d, sy = dx / d; moveCircle(e, sx * 40 * dt, sy * 40 * dt); } if (e.t <= 0) e.st = 'move'; break;
+    }
+  }
+}
+function updateFx(dt) {
+  for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.life -= dt; if (p.life <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
+  if (G.mode === 'dead' || G.mode === 'clear') { G.overlayT += dt; if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30); }
+}
 
-// ---------- ④ 音 ----------
-let actx = null, bgmNode = null, wavUrl = null, audioEl = null;
-function upCtx(){ $('actx').textContent = actx ? actx.state : '未作成'; R.audio.state = actx ? actx.state : 'none'; saveR(); }
-function ensureCtx(){ if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; actx = new AC(); actx.onstatechange = upCtx; } if (actx.state !== 'running') actx.resume(); upCtx(); return actx; }
-function makeWav(freq, ms){ const rate = 22050, n = Math.floor(rate * ms / 1000), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
-  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) { const t = i / rate, env = Math.min(1, (n - i) / (rate * 0.03)); const s = Math.sign(Math.sin(2 * Math.PI * freq * t)) * 0.4 * env; v.setInt16(44 + i * 2, s * 32767, true); }
-  return new Blob([buf], { type: 'audio/wav' }); }
-function alog(m){ $('aulog').textContent = nowStr().slice(11) + ' ' + m + ' ｜ ' + $('aulog').textContent.slice(0, 240); }
-function beep(freq, ms){ const c = ensureCtx(); const o = c.createOscillator(), g = c.createGain(); o.type = 'square'; o.frequency.value = freq; g.gain.setValueAtTime(0.2, c.currentTime); g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + ms / 1000); o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + ms / 1000); }
-$('beep1').addEventListener('click', () => { beep(660, 150); alog('Web Audio 効果音を再生（state=' + actx.state + '）'); });
-$('beep2').addEventListener('click', () => { if (!wavUrl) wavUrl = URL.createObjectURL(makeWav(520, 180)); if (!audioEl) audioEl = new Audio(wavUrl); audioEl.currentTime = 0; audioEl.play().then(() => alog('audio要素 再生OK')).catch(e => alog('audio要素 再生失敗: ' + e.name)); });
-$('bgm').addEventListener('click', () => { const c = ensureCtx(); if (bgmNode) { bgmNode.stop(); bgmNode = null; alog('BGM停止'); return; }
-  const o = c.createOscillator(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain(); o.type = 'triangle'; o.frequency.value = 110; lfo.frequency.value = 2; lg.gain.value = 30; lfo.connect(lg); lg.connect(o.frequency); g.gain.value = 0.08; o.connect(g); g.connect(c.destination); o.start(); lfo.start();
-  bgmNode = { stop(){ o.stop(); lfo.stop(); } }; alog('BGM開始（ホーム画面へ戻って復帰後も鳴っているか）'); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && actx) { const before = actx.state; actx.resume().then(() => { alog('復帰: ' + before + ' → ' + actx.state); upCtx(); }); } });
-const AUITEMS = [['normal', '通常時に3つとも鳴った？'], ['silentWA', '消音スイッチONでWeb Audioが鳴った？'], ['silentEl', '消音スイッチONでaudio要素が鳴った？'], ['resume', 'ホーム画面に戻って復帰後も鳴った？']];
+// ---------- 描画 ----------
+function renderStatic() {
+  if (!G.tiles) return;
+  const W = Math.max(1, Math.ceil(RW * L.s * L.dpr)), H = Math.max(1, Math.ceil(RH * L.s * L.dpr));
+  stat.width = W; stat.height = H; const g = stat.getContext('2d'); g.setTransform(L.s * L.dpr, 0, 0, L.s * L.dpr, 0, 0);
+  g.fillStyle = COL.floor; g.fillRect(0, 0, RW, RH);
+  g.strokeStyle = COL.grid; g.lineWidth = 1; g.beginPath();
+  for (let c = 1; c < COLS; c++) { g.moveTo(c * TILE + 0.5, 0); g.lineTo(c * TILE + 0.5, RH); } for (let r = 1; r < ROWS; r++) { g.moveTo(0, r * TILE + 0.5); g.lineTo(RW, r * TILE + 0.5); } g.stroke();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { if (G.tiles[c + r * COLS] !== 1) continue; g.fillStyle = COL.wall; g.fillRect(c * TILE, r * TILE, TILE, TILE); }
+  g.strokeStyle = COL.wallEdge; g.lineWidth = 2; g.beginPath();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    if (G.tiles[c + r * COLS] !== 1) continue; const x = c * TILE, y = r * TILE;
+    if (tileAt(c, r - 1) !== 1) { g.moveTo(x, y + 1); g.lineTo(x + TILE, y + 1); }
+    if (tileAt(c, r + 1) !== 1) { g.moveTo(x, y + TILE - 1); g.lineTo(x + TILE, y + TILE - 1); }
+    if (tileAt(c - 1, r) !== 1) { g.moveTo(x + 1, y); g.lineTo(x + 1, y + TILE); }
+    if (tileAt(c + 1, r) !== 1) { g.moveTo(x + TILE - 1, y); g.lineTo(x + TILE - 1, y + TILE); }
+  }
+  g.stroke();
+}
+function drawDoors() {
+  const doors = [];
+  if (G.room.doors.N) doors.push([5 * TILE, 0, 2 * TILE, TILE, 'h']); if (G.room.doors.S) doors.push([5 * TILE, RH - TILE, 2 * TILE, TILE, 'h']);
+  if (G.room.doors.W) doors.push([0, 8 * TILE, TILE, 2 * TILE, 'v']); if (G.room.doors.E) doors.push([RW - TILE, 8 * TILE, TILE, 2 * TILE, 'v']);
+  for (const [x, y, w, h, o] of doors) {
+    if (G.open) { ctx.fillStyle = '#070a12'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = COL.doorOpen; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(G.time * 5); ctx.strokeRect(x + 2, y + 2, w - 4, h - 4); ctx.globalAlpha = 1; }
+    else { ctx.fillStyle = '#3a1020'; ctx.fillRect(x, y, w, h); ctx.fillStyle = COL.doorClosed; if (o === 'h') { ctx.fillRect(x, y + 8, w, 6); ctx.fillRect(x, y + 18, w, 6); } else { ctx.fillRect(x + 8, y, 6, h); ctx.fillRect(x + 18, y, 6, h); } }
+  }
+}
+function tri(x, y, r, a) { ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); ctx.lineTo(x + Math.cos(a + 2.4) * r, y + Math.sin(a + 2.4) * r); ctx.lineTo(x + Math.cos(a - 2.4) * r, y + Math.sin(a - 2.4) * r); ctx.closePath(); }
+function dia(x, y, r) { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); }
+function drawEnemy(e) {
+  const col = e.type === 'rusher' ? COL.rusher : COL.shooter;
+  if (e.st === 'spawn') { const k = 1 - Math.max(0, e.t) / 0.9; ctx.strokeStyle = col; ctx.globalAlpha = 0.3 + 0.6 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + (1 - k) * 22, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; return; }
+  if (e.type === 'shooter' && e.st === 'aim') { const k = 1 - e.t / TUNE.shooter.aimT; ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.25 + 0.6 * k; ctx.lineWidth = e.t <= TUNE.shooter.lockT ? 2.5 : 1; if (e.t > TUNE.shooter.lockT) ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.ax, e.ay); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  if (e.type === 'rusher' && e.st === 'dash') { ctx.globalAlpha = 0.25; ctx.fillStyle = col; tri(e.x - e.dx * 14, e.y - e.dy * 14, e.r, e.face); ctx.fill(); ctx.globalAlpha = 0.12; tri(e.x - e.dx * 28, e.y - e.dy * 28, e.r, e.face); ctx.fill(); ctx.globalAlpha = 1; }
+  const flash = e.flash > 0 || (e.st === 'tell' && Math.floor(e.t * 16) % 2 === 0);
+  ctx.fillStyle = flash ? COL.white : col;
+  if (e.type === 'rusher') { tri(e.x, e.y, e.r + 2, e.face); ctx.fill(); } else { dia(e.x, e.y, e.r + 1); ctx.fill(); ctx.fillStyle = '#0b0f1a'; dia(e.x, e.y, 4); ctx.fill(); }
+  if (e.st === 'tell') { ctx.fillStyle = COL.white; ctx.font = '700 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 6); }
+  if (e.hp < e.maxHp) { ctx.fillStyle = '#000'; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24, 3); ctx.fillStyle = col; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24 * e.hp / e.maxHp, 3); }
+}
+function drawPlayer() {
+  if (!player.alive || G.mode === 'title') return;
+  if (player.inv > 0 && Math.floor(player.inv * 12) % 2 === 0) return;
+  if (G.aim) { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([5, 7]); ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(G.aim.x, G.aim.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(G.aim.x, G.aim.y, G.aim.r + 6, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
+  ctx.globalAlpha = 0.18; ctx.fillStyle = COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 6, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill();
+  ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * 6, player.y + Math.sin(player.ang) * 6); ctx.lineTo(player.x + Math.cos(player.ang) * 18, player.y + Math.sin(player.ang) * 18); ctx.stroke();
+  if (!player.moving && G.mode === 'run') { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
+}
+function drawWorld() {
+  ctx.save();
+  const sx = G.shake > 0 ? (Math.random() - 0.5) * G.shake : 0, sy = G.shake > 0 ? (Math.random() - 0.5) * G.shake : 0;
+  ctx.drawImage(stat, L.ox + sx, L.oy + sy, RW * L.s, RH * L.s);
+  ctx.translate(L.ox + sx, L.oy + sy); ctx.scale(L.s, L.s);
+  drawDoors();
+  if (G.portal) { const t = G.portal.t; ctx.strokeStyle = COL.portal; ctx.lineWidth = 3; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 18 + Math.sin(t * 4) * 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 30 + Math.sin(t * 4 + 1) * 4, t, t + 4); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = COL.portal; ctx.font = '600 10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('EXIT', G.portal.x, G.portal.y + 48); }
+  for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.col; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); } ctx.globalAlpha = 1;
+  for (const e of enemies) drawEnemy(e);
+  for (const b of bullets) { if (b.from === 'p') { ctx.strokeStyle = COL.pbullet; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * 0.016, b.y - b.vy * 0.016); ctx.stroke(); } else { ctx.fillStyle = COL.ebullet; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.2832); ctx.fill(); ctx.fillStyle = '#7a4a00'; ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, 6.2832); ctx.fill(); } }
+  drawPlayer();
+  ctx.restore();
+}
+function drawStick() { if (!stick.on || G.mode !== 'run') return; ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 48, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.55; ctx.fillStyle = COL.player; const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy), k = d > 48 ? 48 / d : 1; ctx.beginPath(); ctx.arc(stick.ox + dx * k, stick.oy + dy * k, 16, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
+function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + (s < 10 ? '0' : '') + s; }
+function drawHUD() {
+  layoutButtons();
+  // 上帯
+  ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, 0, L.w, L.topH);
+  for (let i = 0; i < player.maxHp; i++) { const x = 14 + i * 20, y = L.sat + 16; ctx.fillStyle = i < player.hp ? COL.hp : '#2a3350'; dia(x + 7, y + 7, 7); ctx.fill(); }
+  ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  if (G.floor) ctx.fillText('ROOM ' + G.roomsVisited + '/' + G.floor.n + '   KILL ' + G.kills + '   ' + fmt(G.time), 14, L.sat + 52);
+  for (const [b, label] of [[BTN.sound, S.sound ? '♪' : '✕'], [BTN.pause, G.mode === 'pause' ? '▶' : '❚❚']]) { ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1); ctx.fillStyle = COL.text; ctx.font = '600 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, b.x + b.w / 2, b.y + 25); }
+  // 下帯
+  ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, L.h - L.botH, L.w, L.botH);
+  if (G.floor) { const cs = 11, gap = 3, size = GRID * cs + (GRID - 1) * gap, mx = L.w - 14 - size, my = L.h - L.sab - 10 - size;
+    for (const r of G.floor.list) { const known = r.visited || Object.keys(r.doors).some(k => { const nb = neighbor(r, k); return nb && nb.visited; }); if (!known) continue;
+      const x = mx + r.gx * (cs + gap), y = my + r.gy * (cs + gap);
+      if (r === G.room) ctx.fillStyle = COL.player; else if (r.visited) ctx.fillStyle = (r.type === 'exit') ? COL.portal : '#3a5590'; else ctx.fillStyle = '#1a2340';
+      ctx.fillRect(x, y, cs, cs); if (!r.visited) { ctx.strokeStyle = '#3a5590'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1); }
+      if (r.type === 'exit' && r.visited && r !== G.room) { ctx.fillStyle = '#0b0f1a'; ctx.fillRect(x + 4, y + 4, 3, 3); } }
+    ctx.fillStyle = COL.mut; ctx.font = '500 9px sans-serif'; ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4); }
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace';
+  if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl : ''), 14, L.h - L.sab - 17); }
+  ctx.fillText(VERSION, 14, L.h - L.sab - 5);
+  // バナー
+  if (G.banner) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = '700 22px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.topH + 40); ctx.globalAlpha = 1; }
+}
+function overlay(alpha) { ctx.fillStyle = 'rgba(5,8,16,' + alpha + ')'; ctx.fillRect(0, 0, L.w, L.h); }
+function centerText(text, y, font, col, alpha) { ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.fillStyle = col || COL.text; ctx.font = font; ctx.textAlign = 'center'; ctx.fillText(text, L.w / 2, y); ctx.globalAlpha = 1; }
+function drawOverlays() {
+  const cy = L.h / 2, blink = 0.55 + 0.45 * Math.sin(performance.now() / 300);
+  if (G.mode === 'title') {
+    overlay(0.55);
+    centerText('PRINT RUN', cy - 70, '800 44px -apple-system, "Hiragino Sans", sans-serif', COL.player);
+    centerText('―弾丸輪廻―', cy - 38, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text);
+    centerText('タップして開始', cy + 20, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
+    centerText('指で動く ＝ 避ける　／　離す（止まる）＝ 撃つ', cy + 56, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('部屋の敵を全滅させると扉が開く。EXIT の部屋を目指せ', cy + 78, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('通算　刷 ' + S.runs + '　撃破 ' + S.kills + '　クリア ' + S.clears + '　最多到達 ' + S.bestRooms + '部屋', cy + 120, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText(VERSION + '  Phase 1 縦切り', cy + 142, '500 11px Menlo, monospace', COL.mut);
+  } else if (G.mode === 'pause') {
+    overlay(0.7); centerText('一時停止', cy - 120, '700 26px -apple-system, "Hiragino Sans", sans-serif');
+    MENU.length = 0; const items = [['再開', () => { G.mode = 'run'; }], ['新しい刷（やり直す）', () => newRun()], ['音: ' + (S.sound ? 'ON' : 'OFF'), () => setSound(!S.sound)], ['計器: ' + (S.meter ? 'ON' : 'OFF'), () => { S.meter = !S.meter; save(); }]];
+    items.forEach(([label, act], i) => { const w = Math.min(280, L.w - 60), h = 48, x = (L.w - w) / 2, y = cy - 70 + i * 58; MENU.push({ x, y, w, h, act }); ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = '#2a3a60'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); centerText(label, y + 31, '600 16px -apple-system, "Hiragino Sans", sans-serif'); });
+  } else if (G.mode === 'dead') {
+    const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
+    if (G.overlayT > 0.4) { centerText('刷り直し', cy - 60, '800 40px -apple-system, "Hiragino Sans", sans-serif', COL.doorClosed, a); centerText('REPRINT', cy - 34, '600 12px Menlo, monospace', COL.mut, a);
+      centerText('到達 ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy + 10, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
+      if (G.overlayT > 0.7) centerText('タップで次の刷', cy + 60, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink); }
+  } else if (G.mode === 'clear') {
+    const a = Math.min(1, G.overlayT / 0.7); overlay(0.6 * a);
+    centerText('FLOOR CLEAR', cy - 60, '800 36px -apple-system, "Hiragino Sans", sans-serif', COL.portal, a);
+    centerText('部屋 ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy - 10, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
+    centerText('次のフロアは Phase 2 で。', cy + 20, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
+    if (G.overlayT > 0.7) centerText('タップで次の刷', cy + 60, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
+  }
+}
+function draw() {
+  ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, L.w, L.h);
+  if (G.tiles) drawWorld();
+  drawStick(); drawHUD(); drawOverlays();
+}
 
-// ---------- ⑤ 結果 ----------
-function buildSummary(){ R.env = envInfo(); const L = [];
-  L.push('PRINT RUN Phase0 計測結果 ' + VERSION + ' / ' + nowStr());
-  L.push('[環境] ' + R.env.mode + ' / 画面 ' + R.env.screen + ' / 窓 ' + R.env.window + ' / dpr ' + R.env.dpr + ' / safe-area ' + R.env.safeArea + ' / ' + R.env.protocol);
-  L.push('[UA] ' + R.env.ua);
-  L.push('[①描画] ' + (R.fps.length ? R.fps.map(r => r.mode + '解像度 ' + r.res + ' 敵' + r.n + ': 平均' + r.avg + ' 最小' + r.min).join(' ／ ') : '未計測'));
-  L.push('[②タッチ] ' + (R.lat.n ? '入力→描画 平均' + R.lat.avg + 'ms 最大' + R.lat.max + 'ms / ' + R.lat.hz + 'Hz / n=' + R.lat.n : '未計測'));
-  const ga = R.gestures.auto || {}; const gl = []; if (ga.zoom) gl.push('拡大'); if (ga.scroll) gl.push('スクロール'); if (ga.select) gl.push('文字選択'); if (ga.ctx) gl.push('長押しメニュー');
-  L.push('[②ジェスチャ自動検知] ' + (gl.length ? gl.join('・') : 'なし') + ' / 手動: ' + JSON.stringify(R.gestures.manual || {}));
-  L.push('[③保存] 形態 ' + (R.storage.mode || '-') + ' / localStorage ' + (R.storage.ls && R.storage.ls.id ? R.storage.ls.id + '@' + R.storage.ls.at : 'なし') + ' / IndexedDB ' + (R.storage.idb && R.storage.idb.id ? R.storage.idb.id + '@' + R.storage.idb.at : 'なし') + ' / SW ' + (R.storage.sw || '-') + ' / 手動: ' + JSON.stringify(R.storage.manual || {}));
-  L.push('[④音] state ' + (R.audio.state || '-') + ' / 手動: ' + JSON.stringify(R.audio.manual || {}));
-  $('out').value = L.join(String.fromCharCode(10));
-  const T = $('fpsT'); T.innerHTML = '<tr><th>解像度</th><th>内部サイズ</th><th>敵</th><th>平均fps</th><th>最小fps</th></tr>' + R.fps.map(r => '<tr><td>' + r.mode + '</td><td>' + r.res + '</td><td>' + r.n + '</td><td>' + r.avg + '</td><td>' + r.min + '</td></tr>').join('');
-  saveR(); }
-$('mk').addEventListener('click', buildSummary);
-$('cp').addEventListener('click', () => { buildSummary(); const o = $('out'); o.focus(); o.select(); const t = o.value; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => { $('cp').textContent = 'コピーしました'; }).catch(() => { $('cp').textContent = '選択→手動コピー'; }); else $('cp').textContent = '選択→手動コピー'; });
-$('rs').addEventListener('click', () => { if (!confirm('計測結果を全部消しますか？（セーブは残ります）')) return; try { localStorage.removeItem('pr0_results'); } catch (e) {} location.reload(); });
+// ---------- 計器（1フレームのJS処理時間）----------
+const M = { js: [], dts: [], avg: 0, max: 0, fps: 0 };
+function meter(js, dt) { M.js.push(js); M.dts.push(dt); if (M.js.length > 60) { M.js.shift(); M.dts.shift(); } if (M.js.length % 10 === 0) { let s = 0, mx = 0, sd = 0; for (let i = 0; i < M.js.length; i++) { s += M.js[i]; if (M.js[i] > mx) mx = M.js[i]; sd += M.dts[i]; } M.avg = s / M.js.length; M.max = mx; M.fps = sd > 0 ? Math.round(M.js.length / sd) : 0; } }
 
-// ---------- タブ・初期化 ----------
-function show(id){ document.querySelectorAll('section').forEach(s => s.classList.toggle('active', s.id === id)); document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.s === id));
-  if (id === 's1') startFps(); else stopFps(); if (id === 's2') startTouch(); else stopTouch();
-  if (id === 's3') { refreshStorage(); chkList($('stChk'), 'storage', STITEMS, '確認（試してから押す）'); }
-  if (id === 's4') chkList($('auChk'), 'audio', AUITEMS, '確認（試してから押す）');
-  if (id === 's5') buildSummary(); }
-document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => show(b.dataset.s)));
-addEventListener('resize', () => { if (raf1) W1.resize(); if (raf2) W2.resize(); $('mode').textContent = displayMode(); });
-function init(){ loadR(); $('ver').textContent = VERSION; $('mode').textContent = displayMode(); R.env = envInfo(); refreshStorage(); startFps(); }
-if (document.readyState === 'complete') init(); else addEventListener('load', init);
-})();
+// ---------- メインループ ----------
+let last = performance.now();
+function frame(t) {
+  requestAnimationFrame(frame); const t0 = performance.now(); let dt = (t - last) / 1000; last = t; if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
+  if (G.mode === 'run') update(dt); else if (G.mode === 'dead' || G.mode === 'clear') updateFx(dt);
+  draw(); meter(performance.now() - t0, dt);
+}
+
+// ---------- デバッグ用フック（PC確認用・ゲームには影響しない）----------
+const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, S, M, newRun, god: false, forced: null,
+  setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { enemies.length = 0; },
+  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout };
+
+// ---------- 起動 ----------
+layout();
+if (!G.tiles) { /* タイトル背景用に仮の部屋を1つ描いておく */ G.rng = mulberry32(12345); G.floor = genFloor(G.rng); G.room = G.floor.start; G.tiles = buildTiles(G.room); G.open = true; renderStatic(); G.floor = null; }
+requestAnimationFrame(frame);
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) { navigator.serviceWorker.register('./sw.js').catch(() => { }); }
 </script>
 </body>
 </html>
