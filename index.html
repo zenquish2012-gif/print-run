@@ -30,7 +30,7 @@
    主人公1・銃1・敵2種・最小の生成器（部屋グリッド型）・死亡→再開
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）
    ===================================================================== */
-const VERSION = 'p1-0.2.0';
+const VERSION = 'p1-0.2.1';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -40,7 +40,7 @@ const OPP = { N: 'S', S: 'N', W: 'E', E: 'W' };
 // 手触りの調整値（Phase 1 で遊びながら動かす場所はここに集約）
 const TUNE = {
   player:  { hp: 5, spd: 175, fireRate: 0.14, bulletSpd: 700, range: 300, inv: 0.9, stopFire: 0 }, // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)／止まってから初弾までの待ち(秒)
-  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 1100 },     // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前の速度(px/秒)
+  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 400, flickDist: 24, flickWin: 120, flickGap: 120 }, // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前 flickWin ms の移動が flickDist px 以上かつ flickV px/秒以上（指を止めて flickGap ms 以上たって離したら不成立）。p1-0.2.0 の 1100px/秒（直近4サンプル）は実機で「大きく弾かないと出ない」＝2026-09-11 赤入れで緩めた
   ui:      { fallbackSat: 59, fallbackSab: 34 },                                                  // ホーム画面版で safe-area が 0 と読めた時の保険（Phase 0 の iPhone 15 実測値）
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
   shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1 }, // 射撃型: 近すぎ→下がる／狙い(秒)／照準ロック(残り秒)／弾速／再装填
@@ -66,7 +66,7 @@ function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; le
 
 // ---------- 保存（設定＋通算）----------
 const SAVE_KEY = 'printrun.p1';
-let S = { sound: true, meter: true, dashInput: 'tap', runs: 0, kills: 0, clears: 0, bestRooms: 0 };   // dashInput: 'tap' | 'flick' | 'both'
+let S = { sound: true, meter: true, dashInput: 'flick', runs: 0, kills: 0, clears: 0, bestRooms: 0 };   // dashInput: 'tap' | 'flick' | 'both'（既定はフリック＝2026-09-11 マスター選択）
 try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(S, JSON.parse(j)); } catch (e) { }
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { } }
 
@@ -291,7 +291,7 @@ function press(p) {
   return true;
 }
 function stickDown(id, p) { stick.on = true; stick.id = id; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; stick.t0 = performance.now(); stick.hist = [[p.x, p.y, stick.t0]]; }
-function stickMove(p) { stick.x = p.x; stick.y = p.y; stick.hist.push([p.x, p.y, performance.now()]); if (stick.hist.length > 8) stick.hist.shift(); }
+function stickMove(p) { stick.x = p.x; stick.y = p.y; stick.hist.push([p.x, p.y, performance.now()]); if (stick.hist.length > 16) stick.hist.shift(); }
 function stickUp(p) { stick.on = false; stick.id = null; stickRelease(p.x, p.y); }
 // 離した瞬間の判定（2026-09-11 赤入れ「ダッシュが欲しい」）: タップ＝短く触れて離す→その方向へ／フリック＝速く弾いて離す→弾いた方向へ
 function stickRelease(px, py) {
@@ -302,9 +302,10 @@ function stickRelease(px, py) {
     if (d > 4) startDash(dx / d, dy / d); return;
   }
   if (mode === 'flick' || mode === 'both') {
-    const h = stick.hist; if (h.length < 2) return; const b = h[h.length - 1], a = h[Math.max(0, h.length - 4)]; if (now - b[2] > 80) return;   // 指を止めてから離した＝フリックではない
-    const dtm = (b[2] - a[2]) / 1000; if (dtm < 0.005) return; const vx = (b[0] - a[0]) / dtm, vy = (b[1] - a[1]) / dtm, v = Math.hypot(vx, vy);
-    if (v >= TUNE.dash.flickV) startDash(vx / v, vy / v);
+    const h = stick.hist; if (h.length < 2) return; const b = h[h.length - 1]; if (now - b[2] > TUNE.dash.flickGap) return;   // 指を止めてから離した＝フリックではない
+    let a = b; for (let i = h.length - 2; i >= 0; i--) { if (b[2] - h[i][2] > TUNE.dash.flickWin) break; a = h[i]; }   // 直近 flickWin ms の始点
+    const dtm = Math.max(0.008, (b[2] - a[2]) / 1000), dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy), v = dist / dtm;
+    if (dist >= TUNE.dash.flickDist && v >= TUNE.dash.flickV) startDash(dx / dist, dy / dist);
   }
 }
 function startDash(dx, dy) {
@@ -507,7 +508,7 @@ function drawOverlays() {
     centerText('―弾丸輪廻―', cy - 38, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text);
     centerText('タップして開始', cy + 20, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
     centerText('指で動く ＝ 避ける　／　離す（止まる）＝ 撃つ', cy + 56, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('タップ ＝ その方向へダッシュ（無敵）　／　一時停止で操作を切替', cy + 76, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('フリック（弾いて離す）＝ その方向へダッシュ（無敵）　／　一時停止で操作を切替', cy + 76, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('部屋の敵を全滅させると扉が開く。EXIT の部屋を目指せ', cy + 96, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('通算　刷 ' + S.runs + '　撃破 ' + S.kills + '　クリア ' + S.clears + '　最多到達 ' + S.bestRooms + '部屋', cy + 120, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText(VERSION + '  Phase 1 縦切り', cy + 142, '500 11px Menlo, monospace', COL.mut);
