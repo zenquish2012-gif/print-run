@@ -30,7 +30,7 @@
    主人公1・銃1・敵2種・最小の生成器（部屋グリッド型）・死亡→再開
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）
    ===================================================================== */
-const VERSION = 'p1-0.1.0';
+const VERSION = 'p1-0.2.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -39,7 +39,9 @@ const DIRS = { N: { dx: 0, dy: -1 }, S: { dx: 0, dy: 1 }, W: { dx: -1, dy: 0 }, 
 const OPP = { N: 'S', S: 'N', W: 'E', E: 'W' };
 // 手触りの調整値（Phase 1 で遊びながら動かす場所はここに集約）
 const TUNE = {
-  player:  { hp: 5, spd: 175, fireRate: 0.2, bulletSpd: 480, range: 280, inv: 0.9 },          // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)
+  player:  { hp: 5, spd: 175, fireRate: 0.14, bulletSpd: 700, range: 300, inv: 0.9, stopFire: 0 }, // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)／止まってから初弾までの待ち(秒)
+  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 1100 },     // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前の速度(px/秒)
+  ui:      { fallbackSat: 59, fallbackSab: 34 },                                                  // ホーム画面版で safe-area が 0 と読めた時の保険（Phase 0 の iPhone 15 実測値）
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
   shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1 }, // 射撃型: 近すぎ→下がる／狙い(秒)／照準ロック(残り秒)／弾速／再装填
   room:    { base: 3, rand: 3, bonusFrom: 3, max: 6, spawnDist: 170 },                          // 1部屋の敵＝base+0..rand-1（3部屋目以降+1・上限max）／主人公からの最短出現距離
@@ -64,7 +66,7 @@ function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; le
 
 // ---------- 保存（設定＋通算）----------
 const SAVE_KEY = 'printrun.p1';
-let S = { sound: true, meter: true, runs: 0, kills: 0, clears: 0, bestRooms: 0 };
+let S = { sound: true, meter: true, dashInput: 'tap', runs: 0, kills: 0, clears: 0, bestRooms: 0 };   // dashInput: 'tap' | 'flick' | 'both'
 try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(S, JSON.parse(j)); } catch (e) { }
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { } }
 
@@ -94,6 +96,7 @@ const SFX = {
   hurt() { tone(170, 70, 0.28, 'sawtooth', 0.3); noise(0.1, 0.15); },
   tell() { tone(1400, 1400, 0.05, 'square', 0.07); },
   dash() { noise(0.09, 0.15); tone(300, 700, 0.09, 'sine', 0.08); },
+  pdash() { noise(0.06, 0.12); tone(520, 1200, 0.09, 'sine', 0.11); },
   eshot() { tone(640, 320, 0.08, 'sawtooth', 0.1); },
   door() { tone(520, 780, 0.14, 'sine', 0.18); tone(780, 1040, 0.16, 'sine', 0.16, 0.12); },
   spawn() { tone(200, 420, 0.12, 'sine', 0.08); },
@@ -106,8 +109,17 @@ const SFX = {
 // ---------- 画面レイアウト ----------
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const stat = document.createElement('canvas');                    // 部屋の静的レイヤー（床＋壁）＝部屋に入った時だけ描く
-const L = { w: 0, h: 0, dpr: 1, sat: 0, sab: 0, s: 1, ox: 0, oy: 0, topH: 0, botH: 0 };
-function readSafe() { const cs = getComputedStyle(document.getElementById('probe')); L.sat = parseFloat(cs.paddingTop) || 0; L.sab = parseFloat(cs.paddingBottom) || 0; }
+const L = { w: 0, h: 0, dpr: 1, sat: 0, sab: 0, satRaw: 0, sabRaw: 0, s: 1, ox: 0, oy: 0, topH: 0, botH: 0 };
+function isStandalone() { return !!navigator.standalone || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches; }
+function readSafe() {
+  // p0 計測ページと同じ読み方（:root の --sat/--sab）を第一に、probe の padding を第二に（2026-09-11: p1 は probe だけで、iPhone のホーム画面版で 0 と読めて HUD がステータスバーに被った）
+  const rs = getComputedStyle(document.documentElement);
+  let sat = parseFloat(rs.getPropertyValue('--sat')) || 0, sab = parseFloat(rs.getPropertyValue('--sab')) || 0;
+  if (!sat && !sab) { const cs = getComputedStyle(document.getElementById('probe')); sat = parseFloat(cs.paddingTop) || 0; sab = parseFloat(cs.paddingBottom) || 0; }
+  L.satRaw = sat; L.sabRaw = sab;
+  if (isStandalone()) { if (sat < 20) sat = TUNE.ui.fallbackSat; if (sab < 10) sab = TUNE.ui.fallbackSab; }   // 保険＝読めなくても被らない
+  L.sat = sat; L.sab = sab;
+}
 function layout() {
   readSafe(); L.w = innerWidth; L.h = innerHeight; L.dpr = Math.min(3, devicePixelRatio || 1);
   cv.width = Math.round(L.w * L.dpr); cv.height = Math.round(L.h * L.dpr); ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
@@ -118,11 +130,16 @@ function layout() {
 }
 addEventListener('resize', layout); addEventListener('orientationchange', () => setTimeout(layout, 50));
 if (window.visualViewport) visualViewport.addEventListener('resize', layout);
+addEventListener('load', layout); setTimeout(layout, 300); setTimeout(layout, 1000);   // env() が起動直後に確定しない環境の保険
+function relayoutIfChanged() {   // 30フレームごと＝窓の大きさか safe-area が変わっていたら組み直す
+  if (innerWidth !== L.w || innerHeight !== L.h) { layout(); return; }
+  const a = L.sat, b = L.sab; readSafe(); if (a !== L.sat || b !== L.sab) layout();
+}
 
 // ---------- ゲーム状態 ----------
 const G = { mode: 'title', seed: 0, rng: Math.random, floor: null, room: null, tiles: null, open: true, flow: new Int16Array(COLS * ROWS), flowT: 0,
   kills: 0, time: 0, banner: null, shake: 0, portal: null, aim: null, overlayT: 0, roomsVisited: 0, deadT: 0 };
-const player = { x: RW / 2, y: RH / 2, r: 11, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, spd: TUNE.player.spd, moving: false, flash: 0 };
+const player = { x: RW / 2, y: RH / 2, r: 11, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, spd: TUNE.player.spd, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0 };
 let enemies = [], bullets = [], parts = [];
 
 // ---------- 生成器（部屋グリッド型）----------
@@ -214,7 +231,7 @@ function banner(text, t) { G.banner = { text, t: t || 1.2, max: t || 1.2 }; }
 function newRun() {
   G.seed = ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0); G.rng = mulberry32(G.seed); G.floor = genFloor(G.rng);
   G.kills = 0; G.time = 0; G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; G.roomsVisited = 0; parts = [];
-  Object.assign(player, { x: RW / 2, y: RH / 2, hp: player.maxHp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0 });
+  Object.assign(player, { x: RW / 2, y: RH / 2, hp: player.maxHp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0 });
   G.mode = 'run'; enterRoom(G.floor.start, null); SFX.start();
 }
 function enterRoom(room, fromDir) {
@@ -248,10 +265,11 @@ function clearRoom() {
 }
 function floorClear() { G.mode = 'clear'; G.overlayT = 0; S.runs++; S.clears++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.clear(); burst(player.x, player.y, COL.portal, 40, 180, 0.9, 3); }
 function die() { player.alive = false; G.mode = 'dead'; G.overlayT = 0; G.deadT = 0; S.runs++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.dead(); burst(player.x, player.y, COL.player, 50, 220, 1.1, 3); G.shake = 8; }
-function hurt(n) { if (!player.alive || player.inv > 0 || PR.god) return; player.hp -= n; player.inv = TUNE.player.inv; player.flash = 0.15; G.shake = 5; SFX.hurt(); burst(player.x, player.y, COL.hp, 10, 120, 0.4, 2); if (player.hp <= 0) { player.hp = 0; die(); } }
+function dashing() { return player.dashT > 0 && TUNE.dash.inv; }
+function hurt(n) { if (!player.alive || player.inv > 0 || PR.god || dashing()) return; player.hp -= n; player.inv = TUNE.player.inv; player.flash = 0.15; G.shake = 5; SFX.hurt(); burst(player.x, player.y, COL.hp, 10, 120, 0.4, 2); if (player.hp <= 0) { player.hp = 0; die(); } }
 
 // ---------- 入力 ----------
-const stick = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const stick = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0, t0: 0, hist: [] };
 const keys = {}; const inp = { x: 0, y: 0, mag: 0 };
 const BTN = { sound: { x: 0, y: 0, w: 44, h: 38 }, pause: { x: 0, y: 0, w: 44, h: 38 } };
 function layoutButtons() { BTN.pause.x = L.w - 8 - 44; BTN.pause.y = L.sat + 8; BTN.sound.x = L.w - 8 - 44 - 6 - 44; BTN.sound.y = L.sat + 8; }
@@ -272,15 +290,37 @@ function press(p) {
   if (G.mode === 'dead' || G.mode === 'clear') { if (G.overlayT > 0.7) newRun(); return true; }
   return true;
 }
-function tStart(e) { e.preventDefault(); for (const t of e.changedTouches) { const p = { x: t.clientX, y: t.clientY }; if (press(p)) continue; if (!stick.on) { stick.on = true; stick.id = t.identifier; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; } } }
-function tMove(e) { e.preventDefault(); for (const t of e.changedTouches) if (stick.on && t.identifier === stick.id) { stick.x = t.clientX; stick.y = t.clientY; } }
-function tEnd(e) { e.preventDefault(); for (const t of e.changedTouches) if (stick.on && t.identifier === stick.id) { stick.on = false; stick.id = null; } }
+function stickDown(id, p) { stick.on = true; stick.id = id; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; stick.t0 = performance.now(); stick.hist = [[p.x, p.y, stick.t0]]; }
+function stickMove(p) { stick.x = p.x; stick.y = p.y; stick.hist.push([p.x, p.y, performance.now()]); if (stick.hist.length > 8) stick.hist.shift(); }
+function stickUp(p) { stick.on = false; stick.id = null; stickRelease(p.x, p.y); }
+// 離した瞬間の判定（2026-09-11 赤入れ「ダッシュが欲しい」）: タップ＝短く触れて離す→その方向へ／フリック＝速く弾いて離す→弾いた方向へ
+function stickRelease(px, py) {
+  if (G.mode !== 'run' || !player.alive) return;
+  const now = performance.now(), dur = (now - stick.t0) / 1000, dist = Math.hypot(px - stick.ox, py - stick.oy), mode = S.dashInput;
+  if ((mode === 'tap' || mode === 'both') && dur <= TUNE.dash.tapT && dist <= TUNE.dash.tapMove) {
+    const sx = L.ox + player.x * L.s, sy = L.oy + player.y * L.s, dx = px - sx, dy = py - sy, d = Math.hypot(dx, dy);
+    if (d > 4) startDash(dx / d, dy / d); return;
+  }
+  if (mode === 'flick' || mode === 'both') {
+    const h = stick.hist; if (h.length < 2) return; const b = h[h.length - 1], a = h[Math.max(0, h.length - 4)]; if (now - b[2] > 80) return;   // 指を止めてから離した＝フリックではない
+    const dtm = (b[2] - a[2]) / 1000; if (dtm < 0.005) return; const vx = (b[0] - a[0]) / dtm, vy = (b[1] - a[1]) / dtm, v = Math.hypot(vx, vy);
+    if (v >= TUNE.dash.flickV) startDash(vx / v, vy / v);
+  }
+}
+function startDash(dx, dy) {
+  if (G.mode !== 'run' || !player.alive || player.dashCool > 0 || player.dashT > 0) return false;
+  player.dashT = TUNE.dash.t; player.dashCool = TUNE.dash.t + TUNE.dash.cool; player.ddx = dx; player.ddy = dy; player.ang = Math.atan2(dy, dx);
+  SFX.pdash(); burst(player.x, player.y, COL.player, 6, 90, 0.25, 2); return true;
+}
+function tStart(e) { e.preventDefault(); for (const t of e.changedTouches) { const p = { x: t.clientX, y: t.clientY }; if (press(p)) continue; if (!stick.on) stickDown(t.identifier, p); } }
+function tMove(e) { e.preventDefault(); for (const t of e.changedTouches) if (stick.on && t.identifier === stick.id) stickMove({ x: t.clientX, y: t.clientY }); }
+function tEnd(e) { e.preventDefault(); for (const t of e.changedTouches) if (stick.on && t.identifier === stick.id) stickUp({ x: t.clientX, y: t.clientY }); }
 cv.addEventListener('touchstart', tStart, { passive: false }); cv.addEventListener('touchmove', tMove, { passive: false });
 cv.addEventListener('touchend', tEnd, { passive: false }); cv.addEventListener('touchcancel', tEnd, { passive: false });
-cv.addEventListener('mousedown', e => { const p = { x: e.clientX, y: e.clientY }; if (press(p)) return; stick.on = true; stick.id = 'm'; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; });
-addEventListener('mousemove', e => { if (stick.on && stick.id === 'm') { stick.x = e.clientX; stick.y = e.clientY; } });
-addEventListener('mouseup', () => { if (stick.id === 'm') { stick.on = false; stick.id = null; } });
-addEventListener('keydown', e => { keys[e.key] = true; if (e.key === 'Escape' && G.mode === 'run') G.mode = 'pause'; else if (e.key === 'Escape' && G.mode === 'pause') G.mode = 'run'; if ((e.key === ' ' || e.key === 'Enter') && G.mode !== 'run' && G.mode !== 'pause') press({ x: -1, y: -1 }); });
+cv.addEventListener('mousedown', e => { const p = { x: e.clientX, y: e.clientY }; if (press(p)) return; stickDown('m', p); });
+addEventListener('mousemove', e => { if (stick.on && stick.id === 'm') stickMove({ x: e.clientX, y: e.clientY }); });
+addEventListener('mouseup', e => { if (stick.id === 'm') stickUp({ x: e.clientX, y: e.clientY }); });
+addEventListener('keydown', e => { keys[e.key] = true; if ((e.key === ' ' || e.key === 'Shift') && G.mode === 'run') { const m = inp.mag > 0.001; startDash(m ? inp.x / inp.mag : Math.cos(player.ang), m ? inp.y / inp.mag : Math.sin(player.ang)); return; } if (e.key === 'Escape' && G.mode === 'run') G.mode = 'pause'; else if (e.key === 'Escape' && G.mode === 'pause') G.mode = 'run'; if ((e.key === ' ' || e.key === 'Enter') && G.mode !== 'run' && G.mode !== 'pause') press({ x: -1, y: -1 }); });
 addEventListener('keyup', e => { keys[e.key] = false; });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { if (G.mode === 'run') G.mode = 'pause'; stick.on = false; } else { last = performance.now(); au(); } });
 function readInput() {
@@ -297,9 +337,16 @@ function update(dt) {
   if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
   if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30);
   // 主人公
-  player.inv -= dt; player.fireT -= dt; player.flash -= dt;
-  player.moving = inp.mag > 0.001;
-  if (player.moving) { moveCircle(player, inp.x * player.spd * dt, inp.y * player.spd * dt); player.ang = Math.atan2(inp.y, inp.x); }
+  player.inv -= dt; player.fireT -= dt; player.flash -= dt; player.dashCool -= dt;
+  if (player.dashT > 0) {   // ダッシュ中＝入力を受けず直進・撃たない・無敵（TUNE.dash.inv）
+    player.dashT -= dt; moveCircle(player, player.ddx * TUNE.dash.spd * dt, player.ddy * TUNE.dash.spd * dt); player.moving = true;
+    parts.push({ x: player.x - player.ddx * 6, y: player.y - player.ddy * 6, vx: 0, vy: 0, life: 0.16, max: 0.16, col: COL.player, size: 9 });
+    if (player.dashT <= 0) player.fireT = Math.min(player.fireT, TUNE.player.stopFire);
+  } else {
+    const was = player.moving; player.moving = inp.mag > 0.001;
+    if (was && !player.moving) player.fireT = Math.min(player.fireT, TUNE.player.stopFire);   // 止まった瞬間に初弾（2026-09-11 赤入れ「撃ち始めを早く」）
+    if (player.moving) { moveCircle(player, inp.x * player.spd * dt, inp.y * player.spd * dt); player.ang = Math.atan2(inp.y, inp.x); }
+  }
   // ドア通過
   const pc = Math.floor(player.x / TILE), pr = Math.floor(player.y / TILE);
   if (G.tiles[pc + pr * COLS] === 2 && G.open) { const dir = pr === 0 ? 'N' : pr === ROWS - 1 ? 'S' : pc === 0 ? 'W' : 'E'; const nb = neighbor(G.room, dir); if (nb) { enterRoom(nb, OPP[dir]); return; } }
@@ -316,7 +363,7 @@ function update(dt) {
   // 敵
   for (const e of enemies) updateEnemy(e, dt);
   for (let i = 0; i < enemies.length; i++) for (let j = i + 1; j < enemies.length; j++) { const a = enemies[i], b = enemies[j]; if (a.st === 'spawn' || b.st === 'spawn') continue; const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), m = a.r + b.r; if (d > 0 && d < m) { const p = (m - d) / 2, nx = dx / d, ny = dy / d; moveCircle(a, -nx * p, -ny * p); moveCircle(b, nx * p, ny * p); } }
-  for (const e of enemies) { if (e.st === 'spawn') continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < e.r + player.r) { hurt(1); const nx = (player.x - e.x) / (d || 1), ny = (player.y - e.y) / (d || 1); moveCircle(player, nx * 6, ny * 6); } }
+  for (const e of enemies) { if (e.st === 'spawn' || dashing()) continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < e.r + player.r) { hurt(1); const nx = (player.x - e.x) / (d || 1), ny = (player.y - e.y) / (d || 1); moveCircle(player, nx * 6, ny * 6); } }
   // 弾
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i]; b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
@@ -410,6 +457,7 @@ function drawPlayer() {
   ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill();
   ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * 6, player.y + Math.sin(player.ang) * 6); ctx.lineTo(player.x + Math.cos(player.ang) * 18, player.y + Math.sin(player.ang) * 18); ctx.stroke();
   if (!player.moving && G.mode === 'run') { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
+  if (player.dashCool > 0 && player.dashT <= 0) { const k = 1 - player.dashCool / (TUNE.dash.t + TUNE.dash.cool); ctx.strokeStyle = COL.white; ctx.globalAlpha = 0.45; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 8, -Math.PI / 2, -Math.PI / 2 + 6.2832 * k); ctx.stroke(); ctx.globalAlpha = 1; }   // ダッシュ再使用までのリング
 }
 function drawWorld() {
   ctx.save();
@@ -444,7 +492,7 @@ function drawHUD() {
       if (r.type === 'exit' && r.visited && r !== G.room) { ctx.fillStyle = '#0b0f1a'; ctx.fillRect(x + 4, y + 4, 3, 3); } }
     ctx.fillStyle = COL.mut; ctx.font = '500 9px sans-serif'; ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4); }
   ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace';
-  if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl : ''), 14, L.h - L.sab - 17); }
+  if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl : '') + '  sa ' + L.satRaw + '/' + L.sabRaw + '\u2192' + L.sat + '/' + L.sab + '  win ' + L.w + 'x' + L.h + (isStandalone() ? ' sa-mode' : ''), 14, L.h - L.sab - 17); }
   ctx.fillText(VERSION, 14, L.h - L.sab - 5);
   // バナー
   if (G.banner) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = '700 22px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.topH + 40); ctx.globalAlpha = 1; }
@@ -459,12 +507,13 @@ function drawOverlays() {
     centerText('―弾丸輪廻―', cy - 38, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text);
     centerText('タップして開始', cy + 20, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
     centerText('指で動く ＝ 避ける　／　離す（止まる）＝ 撃つ', cy + 56, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('部屋の敵を全滅させると扉が開く。EXIT の部屋を目指せ', cy + 78, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('タップ ＝ その方向へダッシュ（無敵）　／　一時停止で操作を切替', cy + 76, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('部屋の敵を全滅させると扉が開く。EXIT の部屋を目指せ', cy + 96, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('通算　刷 ' + S.runs + '　撃破 ' + S.kills + '　クリア ' + S.clears + '　最多到達 ' + S.bestRooms + '部屋', cy + 120, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText(VERSION + '  Phase 1 縦切り', cy + 142, '500 11px Menlo, monospace', COL.mut);
   } else if (G.mode === 'pause') {
     overlay(0.7); centerText('一時停止', cy - 120, '700 26px -apple-system, "Hiragino Sans", sans-serif');
-    MENU.length = 0; const items = [['再開', () => { G.mode = 'run'; }], ['新しい刷（やり直す）', () => newRun()], ['音: ' + (S.sound ? 'ON' : 'OFF'), () => setSound(!S.sound)], ['計器: ' + (S.meter ? 'ON' : 'OFF'), () => { S.meter = !S.meter; save(); }]];
+    MENU.length = 0; const items = [['再開', () => { G.mode = 'run'; }], ['新しい刷（やり直す）', () => newRun()], ['音: ' + (S.sound ? 'ON' : 'OFF'), () => setSound(!S.sound)], ['計器: ' + (S.meter ? 'ON' : 'OFF'), () => { S.meter = !S.meter; save(); }], ['ダッシュ操作: ' + ({ tap: 'タップ', flick: 'フリック', both: '両方' })[S.dashInput], () => { S.dashInput = ({ tap: 'flick', flick: 'both', both: 'tap' })[S.dashInput] || 'tap'; save(); }]];
     items.forEach(([label, act], i) => { const w = Math.min(280, L.w - 60), h = 48, x = (L.w - w) / 2, y = cy - 70 + i * 58; MENU.push({ x, y, w, h, act }); ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = '#2a3a60'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); centerText(label, y + 31, '600 16px -apple-system, "Hiragino Sans", sans-serif'); });
   } else if (G.mode === 'dead') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
@@ -494,13 +543,13 @@ let last = performance.now();
 function frame(t) {
   requestAnimationFrame(frame); const t0 = performance.now(); let dt = (t - last) / 1000; last = t; if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
   if (G.mode === 'run') update(dt); else if (G.mode === 'dead' || G.mode === 'clear') updateFx(dt);
-  draw(); meter(performance.now() - t0, dt);
+  draw(); meter(performance.now() - t0, dt); if ((M.js.length % 30) === 0) relayoutIfChanged();
 }
 
 // ---------- デバッグ用フック（PC確認用・ゲームには影響しない）----------
 const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, S, M, newRun, god: false, forced: null,
   setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { enemies.length = 0; },
-  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout };
+  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout };
 
 // ---------- 起動 ----------
 layout();
