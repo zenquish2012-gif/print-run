@@ -30,7 +30,7 @@
    主人公1・銃1・敵2種・最小の生成器（部屋グリッド型）・死亡→再開
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）
    ===================================================================== */
-const VERSION = 'p1-0.2.1';
+const VERSION = 'p1-0.2.2';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -40,7 +40,7 @@ const OPP = { N: 'S', S: 'N', W: 'E', E: 'W' };
 // 手触りの調整値（Phase 1 で遊びながら動かす場所はここに集約）
 const TUNE = {
   player:  { hp: 5, spd: 175, fireRate: 0.14, bulletSpd: 700, range: 300, inv: 0.9, stopFire: 0 }, // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)／止まってから初弾までの待ち(秒)
-  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 400, flickDist: 24, flickWin: 120, flickGap: 120 }, // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前 flickWin ms の移動が flickDist px 以上かつ flickV px/秒以上（指を止めて flickGap ms 以上たって離したら不成立）。p1-0.2.0 の 1100px/秒（直近4サンプル）は実機で「大きく弾かないと出ない」＝2026-09-11 赤入れで緩めた
+  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 350, flickDist: 20, flickWin: 120, flickGap: 120 }, // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前 flickWin ms の移動が flickDist px 以上かつ flickV px/秒以上（指を止めて flickGap ms 以上たって離したら不成立）。p1-0.2.0 の 1100px/秒（直近4サンプル）は実機で「大きく弾かないと出ない」＝2026-09-11 赤入れで緩めた。p1-0.2.2＝判定を「離した時」でなく「指が動いている最中」にも行う（離すのを待つ分が「ワンテンポ遅れ」だった）
   ui:      { fallbackSat: 59, fallbackSab: 34 },                                                  // ホーム画面版で safe-area が 0 と読めた時の保険（Phase 0 の iPhone 15 実測値）
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
   shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1 }, // 射撃型: 近すぎ→下がる／狙い(秒)／照準ロック(残り秒)／弾速／再装填
@@ -269,7 +269,7 @@ function dashing() { return player.dashT > 0 && TUNE.dash.inv; }
 function hurt(n) { if (!player.alive || player.inv > 0 || PR.god || dashing()) return; player.hp -= n; player.inv = TUNE.player.inv; player.flash = 0.15; G.shake = 5; SFX.hurt(); burst(player.x, player.y, COL.hp, 10, 120, 0.4, 2); if (player.hp <= 0) { player.hp = 0; die(); } }
 
 // ---------- 入力 ----------
-const stick = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0, t0: 0, hist: [] };
+const stick = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0, t0: 0, hist: [], armed: true };   // armed: 指を置いてから（または速度が落ちてから）まだフリックを出していない
 const keys = {}; const inp = { x: 0, y: 0, mag: 0 };
 const BTN = { sound: { x: 0, y: 0, w: 44, h: 38 }, pause: { x: 0, y: 0, w: 44, h: 38 } };
 function layoutButtons() { BTN.pause.x = L.w - 8 - 44; BTN.pause.y = L.sat + 8; BTN.sound.x = L.w - 8 - 44 - 6 - 44; BTN.sound.y = L.sat + 8; }
@@ -290,8 +290,22 @@ function press(p) {
   if (G.mode === 'dead' || G.mode === 'clear') { if (G.overlayT > 0.7) newRun(); return true; }
   return true;
 }
-function stickDown(id, p) { stick.on = true; stick.id = id; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; stick.t0 = performance.now(); stick.hist = [[p.x, p.y, stick.t0]]; }
-function stickMove(p) { stick.x = p.x; stick.y = p.y; stick.hist.push([p.x, p.y, performance.now()]); if (stick.hist.length > 16) stick.hist.shift(); }
+function stickDown(id, p) { stick.on = true; stick.id = id; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; stick.t0 = performance.now(); stick.hist = [[p.x, p.y, stick.t0]]; stick.armed = true; }
+// 直近 flickWin ms の指の動き（向き・距離・速度）
+function flickVec() {
+  const h = stick.hist; if (h.length < 2) return null; const b = h[h.length - 1]; let a = b;
+  for (let i = h.length - 2; i >= 0; i--) { if (b[2] - h[i][2] > TUNE.dash.flickWin) break; a = h[i]; }
+  const dtm = Math.max(0.008, (b[2] - a[2]) / 1000), dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy);
+  return { dx, dy, dist, v: dist / dtm, t: b[2] };
+}
+function stickMove(p) {
+  stick.x = p.x; stick.y = p.y; stick.hist.push([p.x, p.y, performance.now()]); if (stick.hist.length > 16) stick.hist.shift();
+  // 指が動いている最中にフリックを判定（p1-0.2.2＝離すのを待たない）。1回出したら速度が落ちるまで再判定しない
+  if (G.mode !== 'run' || (S.dashInput !== 'flick' && S.dashInput !== 'both')) return;
+  const f = flickVec(); if (!f) return;
+  if (stick.armed) { if (f.dist >= TUNE.dash.flickDist && f.v >= TUNE.dash.flickV && startDash(f.dx / f.dist, f.dy / f.dist)) stick.armed = false; }
+  else if (f.v < TUNE.dash.flickV * 0.5) stick.armed = true;
+}
 function stickUp(p) { stick.on = false; stick.id = null; stickRelease(p.x, p.y); }
 // 離した瞬間の判定（2026-09-11 赤入れ「ダッシュが欲しい」）: タップ＝短く触れて離す→その方向へ／フリック＝速く弾いて離す→弾いた方向へ
 function stickRelease(px, py) {
@@ -302,10 +316,9 @@ function stickRelease(px, py) {
     if (d > 4) startDash(dx / d, dy / d); return;
   }
   if (mode === 'flick' || mode === 'both') {
-    const h = stick.hist; if (h.length < 2) return; const b = h[h.length - 1]; if (now - b[2] > TUNE.dash.flickGap) return;   // 指を止めてから離した＝フリックではない
-    let a = b; for (let i = h.length - 2; i >= 0; i--) { if (b[2] - h[i][2] > TUNE.dash.flickWin) break; a = h[i]; }   // 直近 flickWin ms の始点
-    const dtm = Math.max(0.008, (b[2] - a[2]) / 1000), dx = b[0] - a[0], dy = b[1] - a[1], dist = Math.hypot(dx, dy), v = dist / dtm;
-    if (dist >= TUNE.dash.flickDist && v >= TUNE.dash.flickV) startDash(dx / dist, dy / dist);
+    if (!stick.armed) return;   // 動いている最中に既に出した
+    const f = flickVec(); if (!f || now - f.t > TUNE.dash.flickGap) return;   // 指を止めてから離した＝フリックではない
+    if (f.dist >= TUNE.dash.flickDist && f.v >= TUNE.dash.flickV) startDash(f.dx / f.dist, f.dy / f.dist);
   }
 }
 function startDash(dx, dy) {
