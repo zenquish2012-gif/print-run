@@ -26,49 +26,92 @@
 <script>
 'use strict';
 /* =====================================================================
-   PRINT RUN ―弾丸輪廻―  Phase 1 縦切り（p1）
-   主人公1・銃1・敵2種・最小の生成器（部屋グリッド型）・死亡→再開
-   操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）
+   PRINT RUN ―弾丸輪廻―  Phase 2 ラン構造（p2）
+   Phase 1（主人公1・銃1・敵2種・部屋グリッド・止まると撃つ・ダッシュ）の上に、
+   フロア3＋ボスフロア／部屋7〜12・商人・宝物庫／扉に報酬を表示して選ぶ／ラン内成長（義体×銃改造）／
+   スクラップ（素材）／中断セーブ（シード＋部屋の進捗＝部屋に入った時点へ戻る）を載せた。
+   操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ
    ===================================================================== */
-const VERSION = 'p1-0.2.2';
+const VERSION = 'p2-0.1.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
-const GRID = 4;                                                                 // 部屋グリッド 4×4
+const GRID = 5;                                                                 // 部屋グリッド 5×5（Phase 2＝部屋7〜12を置くため 4×4 から拡張）
 const DIRS = { N: { dx: 0, dy: -1 }, S: { dx: 0, dy: 1 }, W: { dx: -1, dy: 0 }, E: { dx: 1, dy: 0 } };
 const OPP = { N: 'S', S: 'N', W: 'E', E: 'W' };
-// 手触りの調整値（Phase 1 で遊びながら動かす場所はここに集約）
+// 手触りの調整値（遊びながら動かす場所はここに集約）
 const TUNE = {
   player:  { hp: 5, spd: 175, fireRate: 0.14, bulletSpd: 700, range: 300, inv: 0.9, stopFire: 0 }, // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)／止まってから初弾までの待ち(秒)
-  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 350, flickDist: 20, flickWin: 120, flickGap: 120 }, // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前 flickWin ms の移動が flickDist px 以上かつ flickV px/秒以上（指を止めて flickGap ms 以上たって離したら不成立）。p1-0.2.0 の 1100px/秒（直近4サンプル）は実機で「大きく弾かないと出ない」＝2026-09-11 赤入れで緩めた。p1-0.2.2＝判定を「離した時」でなく「指が動いている最中」にも行う（離すのを待つ分が「ワンテンポ遅れ」だった）
+  dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 350, flickDist: 20, flickWin: 120, flickGap: 120 }, // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前 flickWin ms の移動が flickDist px 以上かつ flickV px/秒以上（指を止めて flickGap ms 以上たって離したら不成立）。p1-0.2.2 で確定（2026-09-11 マスター「ダッシュ良い感じです」）
   ui:      { fallbackSat: 59, fallbackSab: 34 },                                                  // ホーム画面版で safe-area が 0 と読めた時の保険（Phase 0 の iPhone 15 実測値）
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
-  shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1 }, // 射撃型: 近すぎ→下がる／狙い(秒)／照準ロック(残り秒)／弾速／再装填
-  room:    { base: 3, rand: 3, bonusFrom: 3, max: 6, spawnDist: 170 },                          // 1部屋の敵＝base+0..rand-1（3部屋目以降+1・上限max）／主人公からの最短出現距離
+  shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1, nearMax: 0.6 }, // 射撃型: 近すぎ→下がる（nearMax 秒以上続いたら至近で撃つ）／狙い(秒)／照準ロック(残り秒)／弾速／再装填
+  room:    { bonusFrom: 3, spawnDist: 170 },                                                      // 3部屋目以降は敵+1／主人公からの最短出現距離
+  // フロアごとの差分（Phase 2）。rooms＝部屋数の範囲／room＝1部屋の敵＝base+0..rand-1（上限max）／hp＝敵HPの加算。フロア1は Phase 1 と同じ値（難度はマスター判断で据え置き）
+  floors: [
+    { rooms: [7, 9],   room: { base: 3, rand: 3, max: 6 }, hp: 0 },
+    { rooms: [8, 10],  room: { base: 4, rand: 3, max: 7 }, hp: 0 },
+    { rooms: [9, 12],  room: { base: 4, rand: 4, max: 8 }, hp: 1 },
+    { boss: true },
+  ],
+  boss:    { hp: 220, hpPerMod: 0.35, r: 26, spd: 55, tell: 0.7, rest: 0.9, ringN: 12, ringSpd: 175, chargeSpd: 560, chargeT: 0.55, volleyN: 3, volleySpd: 330, enrageAt: 0.5, contact: 1 }, // ボス: HP（＋銃改造の合計Lv×hpPerMod 倍＝ビルドが強いほど長く戦う）／半径／歩く速さ／予兆(秒)／技の間(秒)／放射弾の数・速さ／突進の速さ・時間／三連射の数・速さ／怒りに入るHP割合
+  loot:    { scrapDrop: 0.35, scrapReward: 4, scrapPerFloor: 2, heal: 2, pricePart: 7, priceHeal: 4, priceStep: 2, bossScrap: 12 }, // 撃破時のスクラップ落下率／部屋報酬のスクラップ（＋フロア×2）／回復量／商人の値段（＋フロア×step）
+  parts:   { maxLv: 3, nanoNeed: 4 },                                                             // 部品の最大レベル／修復ナノ＝部屋クリア (nanoNeed−Lv) 回ごとに HP+1
 };
 const COL = {
   bg: '#0b0f1a', floor: '#121c33', grid: '#1a2742', wall: '#24335a', wallEdge: '#4a6ab0',
-  doorClosed: '#ff2d7a', doorOpen: '#00e5ff', player: '#00e5ff', rusher: '#ff2d7a', shooter: '#ffb347',
-  ebullet: '#ffd166', pbullet: '#eaffff', text: '#cfe3ff', mut: '#7f93b8', hp: '#ff4d6d', portal: '#b388ff', white: '#ffffff'
+  doorClosed: '#ff2d7a', doorOpen: '#00e5ff', player: '#00e5ff', rusher: '#ff2d7a', shooter: '#ffb347', boss: '#ff2d7a',
+  ebullet: '#ffd166', pbullet: '#eaffff', text: '#cfe3ff', mut: '#7f93b8', hp: '#ff4d6d', portal: '#b388ff', white: '#ffffff',
+  implant: '#6cff8a', mod: '#ffb347', scrap: '#ffd166', heal: '#ff4d6d', shop: '#ffd166', treasure: '#b388ff', exit: '#b388ff'
 };
+// 報酬・部屋の種類の見せ方（扉の看板・ミニマップ・拾い物で共通）
+const RK = {
+  implant:  { c: COL.implant,  ch: '義', label: '義体' },
+  mod:      { c: COL.mod,      ch: '改', label: '銃改造' },
+  scrap:    { c: COL.scrap,    ch: '材', label: 'スクラップ' },
+  heal:     { c: COL.heal,     ch: '回', label: '回復' },
+  shop:     { c: COL.shop,     ch: '商', label: '商人' },
+  treasure: { c: COL.treasure, ch: '宝', label: '宝物庫' },
+  exit:     { c: COL.exit,     ch: '出', label: '出口' },
+  boss:     { c: COL.boss,     ch: '王', label: 'ボス' },
+};
+// 部品（ラン内成長）＝義体（implant）と銃改造（mod）。どちらも「射撃と回避の挙動を変える」1つの系に束ねる（要件定義 #5）
+const PARTS = [
+  { id: 'legs',   fam: 'implant', short: '脚', name: '脚部アクチュエータ', desc: '移動速度 +12%' },
+  { id: 'reflex', fam: 'implant', short: '反', name: '反射神経ブースト',   desc: 'ダッシュの再使用が 30% 早くなる' },
+  { id: 'armor',  fam: 'implant', short: '装', name: '装甲皮膚',           desc: '最大HP +1（HP も 1 回復）' },
+  { id: 'skin',   fam: 'implant', short: '硬', name: '硬化外皮',           desc: '被弾後の無敵時間 +40%' },
+  { id: 'nano',   fam: 'implant', short: '修', name: '修復ナノマシン',     desc: '部屋を 3 つクリアするごとに HP +1（Lvで短縮）' },
+  { id: 'rate',   fam: 'mod',     short: '連', name: '高速機関部',         desc: '連射 +25%' },
+  { id: 'dmg',    fam: 'mod',     short: '威', name: '大口径弾',           desc: '弾の威力 +1' },
+  { id: 'pierce', fam: 'mod',     short: '貫', name: '徹甲弾',             desc: '弾が敵を 1 体 貫通する' },
+  { id: 'multi',  fam: 'mod',     short: '多', name: '多銃身',             desc: '同時に撃つ弾 +1（扇状に広がる）' },
+  { id: 'range',  fam: 'mod',     short: '射', name: '長銃身',             desc: '射程 +25%・弾速 +15%' },
+];
+const PART = {}; for (const p of PARTS) PART[p.id] = p;
 // 部屋テンプレ（内側10×16の座標・[c, r, w, h] の壁ブロック）。ドアの進入路（内側 cols4-5 の上下2行・rows7-8 の左右2列）は空けてある
 const TPL = [
-  [],                                                                 // 0 空（開始・出口部屋）
+  [],                                                                 // 0 空（開始・商人・宝物庫・ボス部屋）
   [[2, 3, 2, 2], [6, 3, 2, 2], [2, 11, 2, 2], [6, 11, 2, 2]],         // 1 四柱
   [[3, 7, 4, 2]],                                                     // 2 中央ブロック（横一直線の射線を切る）
   [[2, 5, 6, 1], [2, 10, 6, 1]],                                      // 3 二本の横棒
   [[1, 3, 1, 1], [8, 3, 1, 1], [4, 6, 1, 1], [5, 9, 1, 1], [1, 12, 1, 1], [8, 12, 1, 1]], // 4 散在
   [[0, 5, 3, 1], [7, 5, 3, 1], [0, 10, 3, 1], [7, 10, 3, 1]],         // 5 壁から伸びる棚
+  [[1, 2, 2, 1], [7, 2, 2, 1], [4, 7, 2, 2], [1, 13, 2, 1], [7, 13, 2, 1]], // 6 中央柱＋四隅の短い棚
+  [[0, 3, 4, 1], [6, 12, 4, 1], [3, 8, 1, 1], [6, 6, 1, 1]],          // 7 斜めに切る棚と小石
 ];
 
 // ---------- 乱数（シード付き）----------
 function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function floorRng(seed, fi) { return mulberry32((seed + Math.imul(fi + 1, 0x9E3779B9)) >>> 0); }   // フロアごとに独立した列＝中断セーブの再生成で同じ地図になる
 
-// ---------- 保存（設定＋通算）----------
-const SAVE_KEY = 'printrun.p1';
-let S = { sound: true, meter: true, dashInput: 'flick', runs: 0, kills: 0, clears: 0, bestRooms: 0 };   // dashInput: 'tap' | 'flick' | 'both'（既定はフリック＝2026-09-11 マスター選択）
+// ---------- 保存（設定＋通算／ラン中）----------
+const SAVE_KEY = 'printrun.p1', RUN_KEY = 'printrun.run';
+let S = { sound: true, meter: true, dashInput: 'flick', runs: 0, kills: 0, clears: 0, bestRooms: 0, wins: 0, bestFloor: 0, scrapBank: 0 };   // dashInput: 'tap' | 'flick' | 'both'（既定はフリック＝2026-09-11 マスター選択）／scrapBank＝拠点（Phase 3）で使う貯蔵スクラップ
 try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(S, JSON.parse(j)); } catch (e) { }
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { } }
+function loadRun() { try { const j = localStorage.getItem(RUN_KEY); if (!j) return null; const o = JSON.parse(j); return (o && o.v === 2) ? o : null; } catch (e) { return null; } }
+function clearRun() { try { localStorage.removeItem(RUN_KEY); } catch (e) { } G.saved = null; }
 
 // ---------- 音（Web Audio・合成のみ）----------
 const AU = { ctx: null, gain: null };
@@ -104,6 +147,15 @@ const SFX = {
   clear() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.18, 'triangle', 0.16, i * 0.11)); },
   dead() { tone(320, 55, 0.7, 'sawtooth', 0.28); noise(0.3, 0.12, 0.1); },
   start() { tone(440, 660, 0.12, 'square', 0.1); tone(660, 990, 0.14, 'square', 0.1, 0.1); },
+  pick() { tone(660, 1320, 0.12, 'triangle', 0.14); tone(990, 1980, 0.14, 'triangle', 0.1, 0.08); },
+  scrap() { tone(1200, 1800, 0.05, 'square', 0.06); },
+  buy() { tone(880, 1760, 0.1, 'sine', 0.12); tone(1320, 2640, 0.12, 'sine', 0.1, 0.07); },
+  deny() { tone(220, 160, 0.12, 'square', 0.1); },
+  heal() { tone(520, 1040, 0.2, 'sine', 0.14); },
+  bossTell() { tone(110, 90, 0.35, 'sawtooth', 0.16); },
+  bossRing() { noise(0.2, 0.2); tone(300, 120, 0.3, 'square', 0.14); },
+  bossDead() { [200, 160, 120, 80].forEach((f, i) => tone(f, f * 0.5, 0.4, 'sawtooth', 0.22, i * 0.18)); noise(0.8, 0.2, 0.2); },
+  win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.24, 'triangle', 0.16, i * 0.13)); },
 };
 
 // ---------- 画面レイアウト ----------
@@ -123,7 +175,7 @@ function readSafe() {
 function layout() {
   readSafe(); L.w = innerWidth; L.h = innerHeight; L.dpr = Math.min(3, devicePixelRatio || 1);
   cv.width = Math.round(L.w * L.dpr); cv.height = Math.round(L.h * L.dpr); ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
-  L.topH = L.sat + 64; L.botH = L.sab + 70;
+  L.topH = L.sat + 64; L.botH = L.sab + 84;   // 下帯は部品の列（Phase 2）を足して 70→84
   const ph = Math.max(200, L.h - L.topH - L.botH);
   L.s = Math.min(L.w / RW, ph / RH); L.ox = (L.w - RW * L.s) / 2; L.oy = L.topH + (ph - RH * L.s) / 2;
   renderStatic();
@@ -137,21 +189,42 @@ function relayoutIfChanged() {   // 30フレームごと＝窓の大きさか sa
 }
 
 // ---------- ゲーム状態 ----------
-const G = { mode: 'title', seed: 0, rng: Math.random, floor: null, room: null, tiles: null, open: true, flow: new Int16Array(COLS * ROWS), flowT: 0,
-  kills: 0, time: 0, banner: null, shake: 0, portal: null, aim: null, overlayT: 0, roomsVisited: 0, deadT: 0 };
+const G = { mode: 'title', seed: 0, floorIdx: 0, floor: null, room: null, tiles: null, open: true, flow: new Int16Array(COLS * ROWS), flowT: 0,
+  kills: 0, time: 0, banner: null, shake: 0, portal: null, aim: null, overlayT: 0, roomsVisited: 0, deadT: 0,
+  parts: {}, scrap: 0, nanoCnt: 0, pickups: [], peds: [], floats: [], choice: null, saved: null, boss: null, runScrapStart: 0 };
 const player = { x: RW / 2, y: RH / 2, r: 11, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, spd: TUNE.player.spd, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0 };
+const D = { spd: 0, fireRate: 0, dmg: 1, pierce: 0, multi: 0, range: 0, bulletSpd: 0, dashCool: 0, inv: 0 };   // 部品を反映した現在値（recompute で作る）
 let enemies = [], bullets = [], parts = [];
+function lv(id) { return G.parts[id] || 0; }
+function recompute() {
+  D.spd = TUNE.player.spd * (1 + 0.12 * lv('legs')); player.spd = D.spd;
+  D.fireRate = TUNE.player.fireRate / (1 + 0.25 * lv('rate'));
+  D.dmg = 1 + lv('dmg'); D.pierce = lv('pierce'); D.multi = lv('multi');
+  D.range = TUNE.player.range * (1 + 0.25 * lv('range')); D.bulletSpd = TUNE.player.bulletSpd * (1 + 0.15 * lv('range'));
+  D.dashCool = Math.max(0.12, TUNE.dash.cool * (1 - 0.3 * lv('reflex')));
+  D.inv = TUNE.player.inv * (1 + 0.4 * lv('skin'));
+}
+recompute();
+function floorCfg() { return TUNE.floors[G.floorIdx] || TUNE.floors[TUNE.floors.length - 1]; }
+function isBossFloor() { return !!floorCfg().boss; }
+function isCombat(room) { return room.type === 'normal' || room.type === 'exit' || room.type === 'boss'; }
 
 // ---------- 生成器（部屋グリッド型）----------
 function key(x, y) { return x + ',' + y; }
-function genFloor(rng) {
-  const n = 3 + Math.floor(rng() * 3);                              // 部屋3〜5
+function genFloor(fi) {
+  const rng = floorRng(G.seed, fi), cfg = TUNE.floors[fi] || TUNE.floors[TUNE.floors.length - 1];
   const rooms = new Map(), list = [];
-  const add = (gx, gy, type) => { const r = { gx, gy, type, doors: {}, tpl: 0, fx: false, fy: false, cleared: false, visited: false, spawned: false, dist: -1 }; rooms.set(key(gx, gy), r); list.push(r); return r; };
+  const add = (gx, gy, type) => { const r = { gx, gy, type, doors: {}, tpl: 0, fx: false, fy: false, cleared: false, visited: false, spawned: false, dist: -1, reward: null, rewardTaken: false, items: null }; rooms.set(key(gx, gy), r); list.push(r); return r; };
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+  if (cfg.boss) {   // ボスフロア＝開始部屋の北にボス部屋
+    const start = add(2, 4, 'start'); const boss = add(2, 3, 'boss'); start.doors.N = true; boss.doors.S = true; start.dist = 0; boss.dist = 1;
+    return { rooms, list, start, exit: boss, n: 2, idx: fi, boss: true, shop: null, treasure: null };
+  }
+  const n = cfg.rooms[0] + Math.floor(rng() * (cfg.rooms[1] - cfg.rooms[0] + 1));
   const start = add(Math.floor(rng() * GRID), Math.floor(rng() * GRID), 'start');
   let guard = 0;
-  while (list.length < n && guard++ < 500) {
-    const base = list[Math.floor(rng() * list.length)]; const ks = Object.keys(DIRS); const d = DIRS[ks[Math.floor(rng() * 4)]];
+  while (list.length < n && guard++ < 2000) {
+    const base = pick(list); const ks = Object.keys(DIRS); const d = DIRS[ks[Math.floor(rng() * 4)]];
     const nx = base.gx + d.dx, ny = base.gy + d.dy; if (nx < 0 || ny < 0 || nx >= GRID || ny >= GRID || rooms.has(key(nx, ny))) continue;
     add(nx, ny, 'normal');
   }
@@ -160,9 +233,25 @@ function genFloor(rng) {
   start.dist = 0; const q = [start];
   while (q.length) { const r = q.shift(); for (const k in r.doors) { const d = DIRS[k]; const nb = rooms.get(key(r.gx + d.dx, r.gy + d.dy)); if (nb.dist < 0) { nb.dist = r.dist + 1; q.push(nb); } } }
   let far = list.filter(r => r !== start); const md = Math.max.apply(null, far.map(r => r.dist)); far = far.filter(r => r.dist === md);
-  const exit = far[Math.floor(rng() * far.length)]; exit.type = 'exit';
-  for (const r of list) { if (r.type === 'normal') { r.tpl = 1 + Math.floor(rng() * (TPL.length - 1)); r.fx = rng() < 0.5; r.fy = rng() < 0.5; } }
-  return { rooms, list, start, exit, n: list.length };
+  const exit = pick(far); exit.type = 'exit';
+  // 商人・宝物庫＝行き止まり（扉1つ）の部屋を優先して割り当てる（通り道に置くと戦わずに通れてしまう）
+  const cand = list.filter(r => r.type === 'normal');
+  for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+  cand.sort((a, b) => Object.keys(a.doors).length - Object.keys(b.doors).length);
+  let shop = null, treasure = null;
+  if (cand.length >= 4) { shop = cand[0]; shop.type = 'shop'; treasure = cand[1]; treasure.type = 'treasure'; }
+  // 戦闘部屋の報酬（扉に表示して選ばせる）。義体・改造は1フロアに必ず1つずつ
+  const combat = list.filter(r => r.type === 'normal' || r.type === 'exit');
+  for (const r of combat) { const x = rng(); r.reward = x < 0.3 ? 'implant' : x < 0.6 ? 'mod' : x < 0.85 ? 'scrap' : 'heal'; }
+  for (const need of ['implant', 'mod']) { if (!combat.some(r => r.reward === need)) { const alt = combat.filter(r => r.reward === 'scrap' || r.reward === 'heal'); (alt.length ? pick(alt) : pick(combat)).reward = need; } }
+  for (const r of combat) { r.tpl = 1 + Math.floor(rng() * (TPL.length - 1)); r.fx = rng() < 0.5; r.fy = rng() < 0.5; }
+  // 商人の品＝部品2つ（別々）＋回復1つ。値段はフロアで上がる
+  if (shop) {
+    const ids = PARTS.map(p => p.id); for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = ids[i]; ids[i] = ids[j]; ids[j] = t; }
+    const pp = TUNE.loot.pricePart + TUNE.loot.priceStep * fi, ph = TUNE.loot.priceHeal + fi;
+    shop.items = [{ kind: 'part', id: ids[0], price: pp, sold: false }, { kind: 'heal', price: ph, sold: false }, { kind: 'part', id: ids[1], price: pp, sold: false }];
+  }
+  return { rooms, list, start, exit, n: list.length, idx: fi, boss: false, shop, treasure };
 }
 function neighbor(room, dir) { const d = DIRS[dir]; return G.floor.rooms.get(key(room.gx + d.dx, room.gy + d.dy)); }
 function buildTiles(room) {
@@ -182,6 +271,11 @@ function tileAt(c, r) { if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return 1; 
 function solidTile(c, r) { const t = tileAt(c, r); return t === 1 || (t === 2 && !G.open); }
 function solidAt(x, y) { return solidTile(Math.floor(x / TILE), Math.floor(y / TILE)); }
 function los(x0, y0, x1, y1) { const d = Math.hypot(x1 - x0, y1 - y0); const n = Math.max(1, Math.ceil(d / (TILE / 3))); for (let i = 1; i < n; i++) { if (solidAt(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n)) return false; } return true; }
+function freeNear(x, y) {   // (x,y) に最も近い床タイルの中心（テンプレの壁ブロックの上に物を置かないため）
+  let best = null, bd = 1e9;
+  for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) { if (G.tiles[c + r * COLS] !== 0) continue; const cx = c * TILE + TILE / 2, cy = r * TILE + TILE / 2; const d = Math.hypot(cx - x, cy - y); if (d < bd) { bd = d; best = { x: cx, y: cy }; } }
+  return best || { x, y };
+}
 
 // ---------- 当たり（円 vs タイル）----------
 function resolveAxis(e, horiz) {
@@ -226,47 +320,142 @@ function flowDir(e) {
 // ---------- 演出 ----------
 function burst(x, y, col, n, spd, life, size) { for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = spd * (0.4 + Math.random() * 0.8); parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, col, size: size || 3 }); } }
 function banner(text, t) { G.banner = { text, t: t || 1.2, max: t || 1.2 }; }
+function floatText(x, y, text, col) { G.floats.push({ x, y, text, col: col || COL.text, t: 1.1, max: 1.1 }); }
 
-// ---------- ラン・部屋 ----------
+// ---------- 中断セーブ（シード＋部屋の進捗。部屋に入った時点と「安全な状態が変わった時」に書く＝戦闘中の状態は書かない）----------
+function saveRun() {
+  if (!G.floor || !G.room) return;
+  const rooms = {};
+  for (const r of G.floor.list) { if (!r.visited && !r.cleared) continue; rooms[key(r.gx, r.gy)] = { c: r.cleared ? 1 : 0, v: r.visited ? 1 : 0, r: r.rewardTaken ? 1 : 0, s: r.items ? r.items.map(it => it.sold ? 1 : 0) : null }; }
+  const o = { v: 2, seed: G.seed, floor: G.floorIdx, hp: player.hp, maxHp: player.maxHp, parts: G.parts, scrap: G.scrap, kills: G.kills, time: Math.floor(G.time), rv: G.roomsVisited, nano: G.nanoCnt, room: key(G.room.gx, G.room.gy), rooms, at: Date.now() };
+  try { localStorage.setItem(RUN_KEY, JSON.stringify(o)); } catch (e) { }
+  G.saved = o;
+}
+function resumeRun(sv) {
+  G.seed = sv.seed; G.floorIdx = sv.floor; G.floor = genFloor(G.floorIdx);
+  for (const k in sv.rooms) { const r = G.floor.rooms.get(k); if (!r) continue; const f = sv.rooms[k]; r.cleared = !!f.c; r.visited = !!f.v; r.rewardTaken = !!f.r; r.spawned = r.cleared; if (r.items && f.s) r.items.forEach((it, i) => { it.sold = !!f.s[i]; }); }
+  G.parts = Object.assign({}, sv.parts || {}); G.scrap = sv.scrap || 0; G.kills = sv.kills || 0; G.time = sv.time || 0; G.roomsVisited = sv.rv || 0; G.nanoCnt = sv.nano || 0; G.runScrapStart = G.scrap;
+  G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; parts = []; G.floats = []; G.choice = null;
+  Object.assign(player, { hp: sv.hp, maxHp: sv.maxHp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0 });
+  recompute();
+  const room = G.floor.rooms.get(sv.room) || G.floor.start;
+  G.mode = 'run'; enterRoom(room, null); SFX.start();
+}
+
+// ---------- ラン・フロア・部屋 ----------
 function newRun() {
-  G.seed = ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0); G.rng = mulberry32(G.seed); G.floor = genFloor(G.rng);
-  G.kills = 0; G.time = 0; G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; G.roomsVisited = 0; parts = [];
-  Object.assign(player, { x: RW / 2, y: RH / 2, hp: player.maxHp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0 });
+  G.seed = ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0); G.floorIdx = 0; G.floor = genFloor(0);
+  G.kills = 0; G.time = 0; G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; G.roomsVisited = 0; parts = []; G.floats = []; G.choice = null;
+  G.parts = {}; G.scrap = 0; G.nanoCnt = 0; G.runScrapStart = 0;
+  Object.assign(player, { x: RW / 2, y: RH / 2, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0 });
+  recompute(); G.mode = 'run'; enterRoom(G.floor.start, null); SFX.start();
+}
+function nextFloor() {
+  G.floorIdx++; G.floor = genFloor(G.floorIdx); G.roomsVisited = 0; G.portal = null; G.aim = null; G.overlayT = 0; parts = []; G.floats = [];
+  Object.assign(player, { inv: 0, fireT: 0, moving: false, flash: 0, dashT: 0, dashCool: 0 });
   G.mode = 'run'; enterRoom(G.floor.start, null); SFX.start();
 }
+function goTitle() { G.mode = 'title'; G.saved = loadRun(); stick.on = false; }
+function roomLabel(room) {
+  if (room.type === 'start') return G.floor.boss ? 'FINAL FLOOR' : 'FLOOR ' + (G.floorIdx + 1);
+  if (room.type === 'exit') return 'EXIT ROOM'; if (room.type === 'shop') return '商人'; if (room.type === 'treasure') return '宝物庫'; if (room.type === 'boss') return 'BOSS';
+  return 'ROOM ' + G.roomsVisited;
+}
 function enterRoom(room, fromDir) {
-  G.room = room; G.tiles = buildTiles(room); enemies = []; bullets = []; G.portal = null; G.aim = null;
+  G.room = room; G.tiles = buildTiles(room); enemies = []; bullets = []; G.portal = null; G.aim = null; G.pickups = []; G.peds = []; G.boss = null; G.floats = [];
   if (!room.visited) { room.visited = true; G.roomsVisited++; }
   if (fromDir === 'N') { player.x = RW / 2; player.y = TILE * 1.7; } else if (fromDir === 'S') { player.x = RW / 2; player.y = RH - TILE * 1.7; }
-  else if (fromDir === 'W') { player.x = TILE * 1.7; player.y = RH / 2; } else if (fromDir === 'E') { player.x = RW - TILE * 1.7; player.y = RH / 2; } else { player.x = RW / 2; player.y = RH / 2; }
-  if (!room.cleared && room.type !== 'start') { G.open = false; room.spawned = true; spawnEnemies(room); }
-  else { G.open = true; room.cleared = true; if (room.type === 'exit') { G.portal = { x: RW / 2, y: RH / 2, t: 0 }; } }
+  else if (fromDir === 'W') { player.x = TILE * 1.7; player.y = RH / 2; } else if (fromDir === 'E') { player.x = RW - TILE * 1.7; player.y = RH / 2; }
+  else { const p = freeNear(RW / 2, RH / 2); player.x = p.x; player.y = p.y; }
+  if (!room.cleared && room.type === 'boss') { G.open = false; room.spawned = true; spawnBoss(); }
+  else if (!room.cleared && isCombat(room)) { G.open = false; room.spawned = true; spawnEnemies(room); }
+  else {
+    G.open = true; room.cleared = true;
+    if (room.type === 'exit' || room.type === 'boss') placePortal();
+    if ((room.type === 'normal' || room.type === 'exit') && room.spawned && !room.rewardTaken) spawnReward(room, freeNear(RW / 2, RH / 2));   // 再開時＝取り残した報酬を出し直す
+    if (room.type === 'treasure' && !room.rewardTaken) { const p = freeNear(RW / 2, RH / 2); G.peds.push({ kind: 'treasure', x: p.x, y: p.y, t: 0 }); }
+    if (room.type === 'shop' && room.items) room.items.forEach((it, i) => { if (!it.sold) G.peds.push({ kind: 'shop', item: it, i, x: (3 + i * 3) * TILE, y: 8 * TILE, t: 0, msgT: 0 }); });
+  }
   computeFlow(); G.flowT = 0; renderStatic();
-  banner(room.type === 'start' ? 'START' : room.type === 'exit' ? 'EXIT ROOM' : 'ROOM ' + G.roomsVisited, 1.0);
+  banner(roomLabel(room), 1.0);
+  saveRun();
 }
+function placePortal() { const p = freeNear(RW / 2, RH / 2); G.portal = { x: p.x, y: p.y, t: 0, end: G.room.type === 'boss' }; }
 function spawnEnemies(room) {
-  const order = G.roomsVisited; const n = Math.min(TUNE.room.max, TUNE.room.base + Math.floor(G.rng() * TUNE.room.rand) + (order >= TUNE.room.bonusFrom ? 1 : 0));
+  const cfg = floorCfg().room, hpAdd = floorCfg().hp || 0, order = G.roomsVisited;
+  const n = Math.min(cfg.max, cfg.base + Math.floor(Math.random() * cfg.rand) + (order >= TUNE.room.bonusFrom ? 1 : 0));
   const cells = [];
   for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) { if (G.tiles[c + r * COLS] !== 0) continue; const x = c * TILE + TILE / 2, y = r * TILE + TILE / 2; if (Math.hypot(x - player.x, y - player.y) < TUNE.room.spawnDist) continue; cells.push([x, y]); }
-  for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(G.rng() * (i + 1)); const t = cells[i]; cells[i] = cells[j]; cells[j] = t; }
+  for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = cells[i]; cells[i] = cells[j]; cells[j] = t; }
   for (let i = 0; i < n && i < cells.length; i++) {
-    const type = (i === 0) ? 'rusher' : (i === 1) ? 'shooter' : (G.rng() < 0.6 ? 'rusher' : 'shooter');
+    const type = (i === 0) ? 'rusher' : (i === 1) ? 'shooter' : (Math.random() < 0.6 ? 'rusher' : 'shooter');
     const [x, y] = cells[i];
     enemies.push(type === 'rusher'
-      ? { type, x, y, r: 13, hp: TUNE.rusher.hp, maxHp: TUNE.rusher.hp, st: 'spawn', t: 0.8 + i * 0.12, dx: 0, dy: 0, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 }
-      : { type, x, y, r: 12, hp: TUNE.shooter.hp, maxHp: TUNE.shooter.hp, st: 'spawn', t: 0.8 + i * 0.12, ax: x, ay: y, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 });
+      ? { type, x, y, r: 13, hp: TUNE.rusher.hp + hpAdd, maxHp: TUNE.rusher.hp + hpAdd, st: 'spawn', t: 0.8 + i * 0.12, dx: 0, dy: 0, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 }
+      : { type, x, y, r: 12, hp: TUNE.shooter.hp + hpAdd, maxHp: TUNE.shooter.hp + hpAdd, st: 'spawn', t: 0.8 + i * 0.12, ax: x, ay: y, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 });
   }
   SFX.spawn();
 }
+function spawnMinion(x, y, delay) { enemies.push({ type: 'rusher', x, y, r: 13, hp: TUNE.rusher.hp, maxHp: TUNE.rusher.hp, st: 'spawn', t: 0.9 + (delay || 0), dx: 0, dy: 0, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 }); }
+function spawnBoss() {
+  const B = TUNE.boss, p = freeNear(RW / 2, TILE * 5);
+  const modLv = PARTS.filter(q => q.fam === 'mod').reduce((a, q) => a + lv(q.id), 0), hp = Math.round(B.hp * (1 + B.hpPerMod * modLv));
+  const b = { type: 'boss', x: p.x, y: p.y, r: B.r, hp, maxHp: hp, st: 'spawn', t: 1.5, pat: 'ring', seq: 0, enraged: false, dx: 0, dy: 1, flash: 0, face: Math.PI / 2, sx: p.x, sy: p.y, stuckT: 0, nudgeT: 0, nudge: 0, tellT: 0 };
+  enemies.push(b); G.boss = b; SFX.spawn();
+}
 function clearRoom() {
   G.room.cleared = true; G.open = true; SFX.door(); banner('CLEARED', 0.9);
-  if (G.room.type === 'exit') { G.portal = { x: RW / 2, y: RH / 2, t: 0 }; SFX.portal(); }
-  computeFlow();
+  if (G.room.type === 'exit' || G.room.type === 'boss') { placePortal(); SFX.portal(); }
+  if (lv('nano') > 0) { G.nanoCnt++; const need = Math.max(1, TUNE.parts.nanoNeed - lv('nano')); if (G.nanoCnt >= need) { G.nanoCnt = 0; healPlayer(1); } }
+  computeFlow(); saveRun();
 }
-function floorClear() { G.mode = 'clear'; G.overlayT = 0; S.runs++; S.clears++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.clear(); burst(player.x, player.y, COL.portal, 40, 180, 0.9, 3); }
-function die() { player.alive = false; G.mode = 'dead'; G.overlayT = 0; G.deadT = 0; S.runs++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.dead(); burst(player.x, player.y, COL.player, 50, 220, 1.1, 3); G.shake = 8; }
+function floorClear() { G.mode = 'floorclear'; G.overlayT = 0; S.bestFloor = Math.max(S.bestFloor, G.floorIdx + 1); S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); save(); SFX.clear(); burst(player.x, player.y, COL.portal, 40, 180, 0.9, 3); }
+function winRun() { G.mode = 'win'; G.overlayT = 0; S.runs++; S.wins++; S.clears++; S.kills += G.kills; S.bestFloor = Math.max(S.bestFloor, TUNE.floors.length); S.scrapBank += G.scrap; save(); clearRun(); SFX.win(); burst(player.x, player.y, COL.portal, 60, 220, 1.2, 3); }
+function die() { player.alive = false; G.mode = 'dead'; G.overlayT = 0; G.deadT = 0; S.runs++; S.kills += G.kills; S.bestRooms = Math.max(S.bestRooms, G.roomsVisited); S.scrapBank += G.scrap; save(); clearRun(); SFX.dead(); burst(player.x, player.y, COL.player, 50, 220, 1.1, 3); G.shake = 8; }
 function dashing() { return player.dashT > 0 && TUNE.dash.inv; }
-function hurt(n) { if (!player.alive || player.inv > 0 || PR.god || dashing()) return; player.hp -= n; player.inv = TUNE.player.inv; player.flash = 0.15; G.shake = 5; SFX.hurt(); burst(player.x, player.y, COL.hp, 10, 120, 0.4, 2); if (player.hp <= 0) { player.hp = 0; die(); } }
+function hurt(n) { if (!player.alive || player.inv > 0 || PR.god || dashing()) return; player.hp -= n; player.inv = D.inv; player.flash = 0.15; G.shake = 5; SFX.hurt(); burst(player.x, player.y, COL.hp, 10, 120, 0.4, 2); if (player.hp <= 0) { player.hp = 0; die(); } }
+function healPlayer(n) { const before = player.hp; player.hp = Math.min(player.maxHp, player.hp + n); if (player.hp > before) { SFX.heal(); floatText(player.x, player.y - 20, 'HP +' + (player.hp - before), COL.heal); burst(player.x, player.y, COL.heal, 8, 80, 0.5, 2); } }
+
+// ---------- 報酬・部品・スクラップ・商人 ----------
+function spawnReward(room, p) { G.pickups.push({ kind: 'reward', rk: room.reward, x: p.x, y: p.y, t: 0 }); }
+function dropScrap(x, y, n) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.2832, v = 40 + Math.random() * 60; G.pickups.push({ kind: 'scrap', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0 }); } }
+function addScrap(n) { G.scrap += n; }
+function rollParts(fam, n) {   // fam: 'implant' | 'mod' | 'any'。上限レベルの部品は出さない（全部上限なら重複可）
+  let pool = PARTS.filter(p => (fam === 'any' || p.fam === fam) && lv(p.id) < TUNE.parts.maxLv);
+  if (pool.length < n) pool = PARTS.filter(p => fam === 'any' || p.fam === fam);
+  const out = []; const arr = pool.slice();
+  while (out.length < n && arr.length) { const i = Math.floor(Math.random() * arr.length); out.push(arr.splice(i, 1)[0]); }
+  return out;
+}
+function openChooser(fam, from) { G.choice = { fam, from, opts: rollParts(fam, 3) }; G.mode = 'choose'; stick.on = false; }
+function applyPart(p) {
+  if (lv(p.id) >= TUNE.parts.maxLv) { floatText(player.x, player.y - 22, p.name + ' は Lv MAX', COL.mut); return; }
+  G.parts[p.id] = lv(p.id) + 1;
+  if (p.id === 'armor') { player.maxHp++; player.hp++; }
+  recompute(); SFX.pick(); floatText(player.x, player.y - 22, p.name + ' Lv' + lv(p.id), RK[p.fam].c); burst(player.x, player.y, RK[p.fam].c, 14, 120, 0.6, 3);
+}
+function takeReward(pk) {
+  const room = G.room; room.rewardTaken = true;
+  if (pk.rk === 'scrap') { const n = TUNE.loot.scrapReward + TUNE.loot.scrapPerFloor * G.floorIdx; addScrap(n); SFX.buy(); floatText(pk.x, pk.y - 16, 'スクラップ +' + n, COL.scrap); saveRun(); }
+  else if (pk.rk === 'heal') { healPlayer(TUNE.loot.heal); saveRun(); }
+  else { openChooser(pk.rk, 'reward'); }
+}
+function pickChoice(p) {
+  const c = G.choice; if (!c) return; G.choice = null; G.mode = 'run';
+  applyPart(p);
+  if (c.from === 'treasure') { G.room.rewardTaken = true; G.peds = G.peds.filter(q => q.kind !== 'treasure'); }
+  saveRun();
+}
+function touchPed(ped) {
+  if (ped.kind === 'treasure') { openChooser('any', 'treasure'); return; }
+  const it = ped.item; if (it.sold) return;
+  if (it.kind === 'part' && lv(it.id) >= TUNE.parts.maxLv) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'Lv MAX（これ以上は付かない）', COL.mut); } return; }
+  if (G.scrap < it.price) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'スクラップ不足（◆' + it.price + '）', COL.mut); } return; }
+  addScrap(-it.price); it.sold = true; G.peds = G.peds.filter(q => q !== ped); SFX.buy();
+  if (it.kind === 'heal') healPlayer(TUNE.loot.heal); else applyPart(PART[it.id]);
+  saveRun();
+}
+function itemName(it) { return it.kind === 'heal' ? '回復 +' + TUNE.loot.heal : PART[it.id].name; }
 
 // ---------- 入力 ----------
 const stick = { on: false, id: null, ox: 0, oy: 0, x: 0, y: 0, t0: 0, hist: [], armed: true };   // armed: 指を置いてから（または速度が落ちてから）まだフリックを出していない
@@ -274,7 +463,8 @@ const keys = {}; const inp = { x: 0, y: 0, mag: 0 };
 const BTN = { sound: { x: 0, y: 0, w: 44, h: 38 }, pause: { x: 0, y: 0, w: 44, h: 38 } };
 function layoutButtons() { BTN.pause.x = L.w - 8 - 44; BTN.pause.y = L.sat + 8; BTN.sound.x = L.w - 8 - 44 - 6 - 44; BTN.sound.y = L.sat + 8; }
 function inBtn(b, p) { return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h; }
-const MENU = [];  // 一時停止メニューの行（描画時に座標を入れる）
+const UI = [];  // 画面上のボタン（タイトル・一時停止・選択。描画時に座標を入れ、press で当てる）
+function hitUI(p) { for (const m of UI) if (p.x >= m.x && p.x <= m.x + m.w && p.y >= m.y && p.y <= m.y + m.h) { m.act(); return true; } return false; }
 function press(p) {
   au();
   if (G.mode === 'run') {
@@ -282,12 +472,11 @@ function press(p) {
     if (inBtn(BTN.pause, p)) { G.mode = 'pause'; stick.on = false; return true; }
     return false;
   }
-  if (G.mode === 'title') { newRun(); return true; }
-  if (G.mode === 'pause') {
-    for (const m of MENU) if (p.x >= m.x && p.x <= m.x + m.w && p.y >= m.y && p.y <= m.y + m.h) { m.act(); return true; }
-    return true;
-  }
-  if (G.mode === 'dead' || G.mode === 'clear') { if (G.overlayT > 0.7) newRun(); return true; }
+  if (G.mode === 'title') { hitUI(p); return true; }
+  if (G.mode === 'pause') { hitUI(p); return true; }
+  if (G.mode === 'choose') { hitUI(p); return true; }
+  if (G.mode === 'floorclear') { if (G.overlayT > 0.7) nextFloor(); return true; }
+  if (G.mode === 'dead' || G.mode === 'win') { if (G.overlayT > 0.7) goTitle(); return true; }
   return true;
 }
 function stickDown(id, p) { stick.on = true; stick.id = id; stick.ox = stick.x = p.x; stick.oy = stick.y = p.y; stick.t0 = performance.now(); stick.hist = [[p.x, p.y, stick.t0]]; stick.armed = true; }
@@ -323,7 +512,7 @@ function stickRelease(px, py) {
 }
 function startDash(dx, dy) {
   if (G.mode !== 'run' || !player.alive || player.dashCool > 0 || player.dashT > 0) return false;
-  player.dashT = TUNE.dash.t; player.dashCool = TUNE.dash.t + TUNE.dash.cool; player.ddx = dx; player.ddy = dy; player.ang = Math.atan2(dy, dx);
+  player.dashT = TUNE.dash.t; player.dashCool = TUNE.dash.t + D.dashCool; player.ddx = dx; player.ddy = dy; player.ang = Math.atan2(dy, dx);
   SFX.pdash(); burst(player.x, player.y, COL.player, 6, 90, 0.25, 2); return true;
 }
 function tStart(e) { e.preventDefault(); for (const t of e.changedTouches) { const p = { x: t.clientX, y: t.clientY }; if (press(p)) continue; if (!stick.on) stickDown(t.identifier, p); } }
@@ -334,7 +523,14 @@ cv.addEventListener('touchend', tEnd, { passive: false }); cv.addEventListener('
 cv.addEventListener('mousedown', e => { const p = { x: e.clientX, y: e.clientY }; if (press(p)) return; stickDown('m', p); });
 addEventListener('mousemove', e => { if (stick.on && stick.id === 'm') stickMove({ x: e.clientX, y: e.clientY }); });
 addEventListener('mouseup', e => { if (stick.id === 'm') stickUp({ x: e.clientX, y: e.clientY }); });
-addEventListener('keydown', e => { keys[e.key] = true; if ((e.key === ' ' || e.key === 'Shift') && G.mode === 'run') { const m = inp.mag > 0.001; startDash(m ? inp.x / inp.mag : Math.cos(player.ang), m ? inp.y / inp.mag : Math.sin(player.ang)); return; } if (e.key === 'Escape' && G.mode === 'run') G.mode = 'pause'; else if (e.key === 'Escape' && G.mode === 'pause') G.mode = 'run'; if ((e.key === ' ' || e.key === 'Enter') && G.mode !== 'run' && G.mode !== 'pause') press({ x: -1, y: -1 }); });
+addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if ((e.key === ' ' || e.key === 'Shift') && G.mode === 'run') { const m = inp.mag > 0.001; startDash(m ? inp.x / inp.mag : Math.cos(player.ang), m ? inp.y / inp.mag : Math.sin(player.ang)); return; }
+  if (e.key === 'Escape' && G.mode === 'run') G.mode = 'pause'; else if (e.key === 'Escape' && G.mode === 'pause') G.mode = 'run';
+  if ((e.key === '1' || e.key === '2' || e.key === '3') && G.mode === 'choose' && G.choice) { const o = G.choice.opts[+e.key - 1]; if (o) pickChoice(o); return; }
+  if ((e.key === ' ' || e.key === 'Enter') && (G.mode === 'dead' || G.mode === 'win' || G.mode === 'floorclear')) press({ x: -1, y: -1 });
+  if ((e.key === ' ' || e.key === 'Enter') && G.mode === 'title') { const m = UI[0]; if (m) m.act(); }
+});
 addEventListener('keyup', e => { keys[e.key] = false; });
 document.addEventListener('visibilitychange', () => { if (document.hidden) { if (G.mode === 'run') G.mode = 'pause'; stick.on = false; } else { last = performance.now(); au(); } });
 function readInput() {
@@ -346,6 +542,7 @@ function readInput() {
 }
 
 // ---------- 更新 ----------
+function fireBullet(a) { bullets.push({ x: player.x + Math.cos(a) * 14, y: player.y + Math.sin(a) * 14, vx: Math.cos(a) * D.bulletSpd, vy: Math.sin(a) * D.bulletSpd, r: 3, from: 'p', life: 1.2, dmg: D.dmg, pierce: D.pierce, last: null }); }
 function update(dt) {
   G.time += dt; readInput();
   if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
@@ -369,40 +566,62 @@ function update(dt) {
   // 自動照準・射撃（止まっている時だけ）
   G.aim = null;
   if (!player.moving) {
-    let best = null, bd = TUNE.player.range;
+    let best = null, bd = D.range;
     for (const e of enemies) { if (e.st === 'spawn') continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < bd && los(player.x, player.y, e.x, e.y)) { bd = d; best = e; } }
     if (best) { G.aim = best; player.ang = Math.atan2(best.y - player.y, best.x - player.x);
-      if (player.fireT <= 0) { player.fireT = TUNE.player.fireRate; const a = player.ang + (Math.random() - 0.5) * 0.06; bullets.push({ x: player.x + Math.cos(a) * 14, y: player.y + Math.sin(a) * 14, vx: Math.cos(a) * TUNE.player.bulletSpd, vy: Math.sin(a) * TUNE.player.bulletSpd, r: 3, from: 'p', life: 1.2 }); SFX.shot(); parts.push({ x: player.x + Math.cos(a) * 16, y: player.y + Math.sin(a) * 16, vx: 0, vy: 0, life: 0.05, max: 0.05, col: COL.white, size: 5 }); } }
+      if (player.fireT <= 0) { player.fireT = D.fireRate; const n = 1 + D.multi; for (let i = 0; i < n; i++) { const a = player.ang + (n > 1 ? (i - (n - 1) / 2) * 0.14 : 0) + (Math.random() - 0.5) * 0.06; fireBullet(a); } SFX.shot(); const a0 = player.ang; parts.push({ x: player.x + Math.cos(a0) * 16, y: player.y + Math.sin(a0) * 16, vx: 0, vy: 0, life: 0.05, max: 0.05, col: COL.white, size: 5 }); } }
   }
   // 敵
   for (const e of enemies) updateEnemy(e, dt);
-  for (let i = 0; i < enemies.length; i++) for (let j = i + 1; j < enemies.length; j++) { const a = enemies[i], b = enemies[j]; if (a.st === 'spawn' || b.st === 'spawn') continue; const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), m = a.r + b.r; if (d > 0 && d < m) { const p = (m - d) / 2, nx = dx / d, ny = dy / d; moveCircle(a, -nx * p, -ny * p); moveCircle(b, nx * p, ny * p); } }
-  for (const e of enemies) { if (e.st === 'spawn' || dashing()) continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < e.r + player.r) { hurt(1); const nx = (player.x - e.x) / (d || 1), ny = (player.y - e.y) / (d || 1); moveCircle(player, nx * 6, ny * 6); } }
+  for (let i = 0; i < enemies.length; i++) for (let j = i + 1; j < enemies.length; j++) { const a = enemies[i], b = enemies[j]; if (a.st === 'spawn' || b.st === 'spawn') continue; const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), m = a.r + b.r; if (d > 0 && d < m) { const p = (m - d) / 2, nx = dx / d, ny = dy / d; if (a.type !== 'boss') moveCircle(a, -nx * p, -ny * p); if (b.type !== 'boss') moveCircle(b, nx * p, ny * p); } }
+  for (const e of enemies) { if (e.st === 'spawn' || dashing()) continue; const d = Math.hypot(e.x - player.x, e.y - player.y); if (d < e.r + player.r) { hurt(e.type === 'boss' ? TUNE.boss.contact : 1); const nx = (player.x - e.x) / (d || 1), ny = (player.y - e.y) / (d || 1); moveCircle(player, nx * 6, ny * 6); } }
   // 弾
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i]; b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.life <= 0 || solidAt(b.x, b.y)) { burst(b.x, b.y, b.from === 'p' ? COL.pbullet : COL.ebullet, 3, 60, 0.2, 2); bullets.splice(i, 1); continue; }
     if (b.from === 'p') {
-      for (let k = enemies.length - 1; k >= 0; k--) { const e = enemies[k]; if (e.st === 'spawn') continue; if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.r) {
-        e.hp -= 1; e.flash = 0.08; moveCircle(e, b.vx * 0.012, b.vy * 0.012); burst(b.x, b.y, COL.white, 4, 90, 0.2, 2); SFX.hit(); bullets.splice(i, 1);
-        if (e.hp <= 0) { enemies.splice(k, 1); G.kills++; burst(e.x, e.y, e.type === 'rusher' ? COL.rusher : COL.shooter, 16, 160, 0.6, 3); SFX.kill(); }
+      let gone = false;
+      for (let k = enemies.length - 1; k >= 0; k--) { const e = enemies[k]; if (e.st === 'spawn' || e === b.last) continue; if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.r) {
+        e.hp -= b.dmg; e.flash = 0.08; if (e.type !== 'boss') moveCircle(e, b.vx * 0.012, b.vy * 0.012); burst(b.x, b.y, COL.white, 4, 90, 0.2, 2); SFX.hit();
+        if (e.hp <= 0) killEnemy(k);
+        if (b.pierce > 0) { b.pierce--; b.last = e; } else { bullets.splice(i, 1); gone = true; }
         break; } }
+      if (gone) continue;
     } else if (player.alive && Math.hypot(player.x - b.x, player.y - b.y) < player.r + b.r) { bullets.splice(i, 1); hurt(1); }
   }
+  // 拾い物（スクラップは近づくと吸い寄せ）・台座
+  for (let i = G.pickups.length - 1; i >= 0; i--) {
+    const p = G.pickups[i]; p.t += dt;
+    if (p.kind === 'scrap') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; if (solidAt(p.x, p.y)) { p.vx = -p.vx; p.vy = -p.vy; p.x += p.vx * dt * 2; p.y += p.vy * dt * 2; }
+      const dx = player.x - p.x, dy = player.y - p.y, d = Math.hypot(dx, dy); if (d < 70 && p.t > 0.25) { p.x += dx / d * 260 * dt; p.y += dy / d * 260 * dt; }
+      if (d < player.r + 8) { G.pickups.splice(i, 1); addScrap(1); SFX.scrap(); } }
+    else if (Math.hypot(player.x - p.x, player.y - p.y) < player.r + 16) { G.pickups.splice(i, 1); takeReward(p); if (G.mode !== 'run') return; }
+  }
+  for (const ped of G.peds) { ped.t += dt; ped.msgT -= dt; const d = Math.hypot(player.x - ped.x, player.y - ped.y); if (d < player.r + 17) { touchPed(ped); if (G.mode !== 'run') return; } }
   // 部屋クリア・出口
   if (!G.room.cleared && G.room.spawned && enemies.length === 0) clearRoom();
-  if (G.portal) { G.portal.t += dt; if (Math.hypot(player.x - G.portal.x, player.y - G.portal.y) < 22) { floorClear(); return; } }
+  if (G.portal) { G.portal.t += dt; if (Math.hypot(player.x - G.portal.x, player.y - G.portal.y) < 22) { if (G.portal.end) winRun(); else floorClear(); return; } }
   updateFx(dt);
 }
+function killEnemy(k) {
+  const e = enemies[k]; enemies.splice(k, 1); G.kills++;
+  if (e.type === 'boss') { G.boss = null; burst(e.x, e.y, COL.boss, 60, 240, 1.2, 4); burst(e.x, e.y, COL.white, 30, 160, 0.9, 3); SFX.bossDead(); G.shake = 12; dropScrap(e.x, e.y, TUNE.loot.bossScrap); banner('TARGET DOWN', 1.6); return; }
+  burst(e.x, e.y, e.type === 'rusher' ? COL.rusher : COL.shooter, 16, 160, 0.6, 3); SFX.kill();
+  if (Math.random() < TUNE.loot.scrapDrop) dropScrap(e.x, e.y, 1);
+  // 部屋の最後の1体＝報酬がその場に出る（Hades の「部屋クリアで報酬」）
+  if (enemies.length === 0 && !G.room.cleared && (G.room.type === 'normal' || G.room.type === 'exit') && G.room.reward && !G.room.rewardTaken) { const p = freeNear(e.x, e.y); spawnReward(G.room, p); }
+}
+function walkTo(e, dt, spd, prefer, dx, dy, d) { let v = null; if (e.nudgeT > 0) { e.nudgeT -= dt; v = { x: Math.cos(e.nudge), y: Math.sin(e.nudge) }; } else if (prefer && los(e.x, e.y, player.x, player.y)) v = { x: dx / d, y: dy / d }; else v = flowDir(e) || { x: dx / d, y: dy / d }; moveCircle(e, v.x * spd * dt, v.y * spd * dt); e.face = Math.atan2(v.y, v.x); }
+function enemyShot(x, y, a, spd, r) { bullets.push({ x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: r || 5, from: 'e', life: 4 }); }
 function updateEnemy(e, dt) {
   e.flash -= dt; const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 1;
   const see = () => los(e.x, e.y, player.x, player.y);
-  const walk = (spd, prefer) => { let v = null; if (e.nudgeT > 0) { e.nudgeT -= dt; v = { x: Math.cos(e.nudge), y: Math.sin(e.nudge) }; } else if (prefer && see()) v = { x: dx / d, y: dy / d }; else v = flowDir(e) || { x: dx / d, y: dy / d }; moveCircle(e, v.x * spd * dt, v.y * spd * dt); e.face = Math.atan2(v.y, v.x); };
+  if (e.type === 'boss') { updateBoss(e, dt, dx, dy, d); return; }
   if (e.st === 'chase' || e.st === 'move') { e.stuckT += dt; if (e.stuckT >= 1.5) { if (Math.hypot(e.x - e.sx, e.y - e.sy) < 6) { e.nudge = Math.random() * Math.PI * 2; e.nudgeT = 0.5; } e.sx = e.x; e.sy = e.y; e.stuckT = 0; } }
   if (e.type === 'rusher') {
     switch (e.st) {
       case 'spawn': e.t -= dt; if (e.t <= 0) { e.st = 'chase'; } break;
-      case 'chase': if (d < TUNE.rusher.tellDist && see()) { e.st = 'tell'; e.t = TUNE.rusher.tellT; SFX.tell(); } else walk(TUNE.rusher.spd, true); break;
+      case 'chase': if (d < TUNE.rusher.tellDist && see()) { e.st = 'tell'; e.t = TUNE.rusher.tellT; SFX.tell(); } else walkTo(e, dt, TUNE.rusher.spd, true, dx, dy, d); break;
       case 'tell': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t <= 0) { e.dx = dx / d; e.dy = dy / d; e.st = 'dash'; e.t = TUNE.rusher.dashT; SFX.dash(); } break;
       case 'dash': e.t -= dt; { const hit = moveCircle(e, e.dx * TUNE.rusher.dashSpd * dt, e.dy * TUNE.rusher.dashSpd * dt); if (hit) { e.t = Math.min(e.t, 0.05); } } if (e.t <= 0) { e.st = 'rest'; e.t = TUNE.rusher.restT; } break;
       case 'rest': e.t -= dt; if (e.t <= 0) e.st = 'chase'; break;
@@ -410,16 +629,42 @@ function updateEnemy(e, dt) {
   } else {
     switch (e.st) {
       case 'spawn': e.t -= dt; if (e.t <= 0) { e.st = 'move'; } break;
-      case 'move': if (see()) { if (d < TUNE.shooter.near) { moveCircle(e, -dx / d * TUNE.shooter.spd * dt, -dy / d * TUNE.shooter.spd * dt); e.face = Math.atan2(dy, dx); } else if (d < TUNE.shooter.far) { e.st = 'aim'; e.t = TUNE.shooter.aimT; e.ax = player.x; e.ay = player.y; SFX.tell(); } else walk(TUNE.shooter.spd, true); } else walk(TUNE.shooter.spd, false); break;
+      case 'move': if (see()) {
+          // 近すぎれば下がる。ただし下がり続けて「視線の境目で行ったり来たり」になると主人公が撃てず詰むため、近距離が続いたら至近で撃つ（p2-0.1.0＝棒立ち実測で発見）
+          if (d < TUNE.shooter.near && (e.nearT = (e.nearT || 0) + dt) < TUNE.shooter.nearMax) { moveCircle(e, -dx / d * TUNE.shooter.spd * dt, -dy / d * TUNE.shooter.spd * dt); e.face = Math.atan2(dy, dx); }
+          else if (d < TUNE.shooter.far) { e.st = 'aim'; e.t = TUNE.shooter.aimT; e.ax = player.x; e.ay = player.y; e.nearT = 0; SFX.tell(); } else { e.nearT = 0; walkTo(e, dt, TUNE.shooter.spd, true, dx, dy, d); } }
+        else walkTo(e, dt, TUNE.shooter.spd, false, dx, dy, d); break;
       case 'aim': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t > TUNE.shooter.lockT) { e.ax = player.x; e.ay = player.y; }
-        if (e.t <= 0) { const a = Math.atan2(e.ay - e.y, e.ax - e.x); bullets.push({ x: e.x + Math.cos(a) * 14, y: e.y + Math.sin(a) * 14, vx: Math.cos(a) * TUNE.shooter.bulletSpd, vy: Math.sin(a) * TUNE.shooter.bulletSpd, r: 5, from: 'e', life: 4 }); SFX.eshot(); e.st = 'cool'; e.t = TUNE.shooter.coolT; } break;
+        if (e.t <= 0) { const a = Math.atan2(e.ay - e.y, e.ax - e.x); enemyShot(e.x, e.y, a, TUNE.shooter.bulletSpd, 5); SFX.eshot(); e.st = 'cool'; e.t = TUNE.shooter.coolT; } break;
       case 'cool': e.t -= dt; { const sx = -dy / d, sy = dx / d; moveCircle(e, sx * 40 * dt, sy * 40 * dt); } if (e.t <= 0) e.st = 'move'; break;
     }
   }
 }
+// ボス＝3つの技（放射弾・突進・三連射）を順に。予兆つき。HP半分で怒り＝間が短く・放射が増え・手下2体
+function updateBoss(e, dt, dx, dy, d) {
+  const B = TUNE.boss, k = e.enraged ? 0.65 : 1;
+  if (!e.enraged && e.hp <= e.maxHp * B.enrageAt) { e.enraged = true; banner('!! ENRAGED !!', 1.2); SFX.bossTell(); G.shake = 6; spawnMinion(TILE * 2, TILE * 2, 0); spawnMinion(RW - TILE * 2, RH - TILE * 2, 0.2); }
+  switch (e.st) {
+    case 'spawn': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t <= 0) { e.st = 'rest'; e.t = 0.5; } break;
+    case 'rest': e.t -= dt; walkTo(e, dt, B.spd, true, dx, dy, d);
+      if (e.t <= 0) { const order = ['ring', 'charge', 'volley']; e.pat = order[e.seq % 3]; e.seq++; if (e.enraged && Math.random() < 0.3) e.pat = 'charge'; e.st = 'tell'; e.t = B.tell * (e.pat === 'volley' ? 0.8 : 1); e.tellT = e.t; SFX.bossTell(); } break;
+    case 'tell': e.t -= dt; e.face = Math.atan2(dy, dx);
+      if (e.t <= 0) {
+        if (e.pat === 'ring') { e.st = 'ring'; e.t = 0; e.n = 0; }
+        else if (e.pat === 'charge') { e.dx = dx / d; e.dy = dy / d; e.st = 'charge'; e.t = B.chargeT; SFX.dash(); }
+        else { e.st = 'volley'; e.t = 0; e.n = 0; }
+      } break;
+    case 'ring': e.t -= dt;
+      if (e.t <= 0) { const N = B.ringN + (e.enraged ? 4 : 0), off = (e.n % 2) * Math.PI / N + Math.random() * 0.2; for (let i = 0; i < N; i++) enemyShot(e.x, e.y, off + i * 6.2832 / N, B.ringSpd, 5); SFX.bossRing(); G.shake = 4; e.n++; e.t = 0.42; if (e.n >= (e.enraged ? 3 : 2)) { e.st = 'rest'; e.t = B.rest * k; } } break;
+    case 'charge': e.t -= dt; { const hit = moveCircle(e, e.dx * B.chargeSpd * dt, e.dy * B.chargeSpd * dt); parts.push({ x: e.x - e.dx * 10, y: e.y - e.dy * 10, vx: 0, vy: 0, life: 0.2, max: 0.2, col: COL.boss, size: 14 }); if (hit) { e.t = Math.min(e.t, 0.05); G.shake = 5; } } if (e.t <= 0) { e.st = 'rest'; e.t = B.rest * k * 1.3; } break;
+    case 'volley': e.t -= dt; e.face = Math.atan2(dy, dx);
+      if (e.t <= 0) { const a = Math.atan2(dy, dx); for (let i = 0; i < B.volleyN; i++) enemyShot(e.x, e.y, a + (i - (B.volleyN - 1) / 2) * 0.16, B.volleySpd, 5); SFX.eshot(); e.n++; e.t = 0.3; if (e.n >= (e.enraged ? 3 : 2)) { e.st = 'rest'; e.t = B.rest * k; } } break;
+  }
+}
 function updateFx(dt) {
   for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.life -= dt; if (p.life <= 0) { parts.splice(i, 1); continue; } p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
-  if (G.mode === 'dead' || G.mode === 'clear') { G.overlayT += dt; if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30); }
+  for (let i = G.floats.length - 1; i >= 0; i--) { const f = G.floats[i]; f.t -= dt; f.y -= 18 * dt; if (f.t <= 0) G.floats.splice(i, 1); }
+  if (G.mode !== 'run') { G.overlayT += dt; if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 30); }
 }
 
 // ---------- 描画 ----------
@@ -441,18 +686,32 @@ function renderStatic() {
   }
   g.stroke();
 }
+function roomKind(r) {   // 扉の看板・ミニマップに出す「その部屋に何があるか」
+  if (r.type === 'shop') return 'shop'; if (r.type === 'treasure') return 'treasure'; if (r.type === 'boss') return 'boss'; if (r.type === 'exit') return 'exit';
+  if (r.type === 'normal') return r.reward; return null;
+}
+function sign(x, y, kind, dim) {   // 扉の看板＝色枠＋1文字
+  const k = RK[kind]; if (!k) return;
+  ctx.globalAlpha = dim ? 0.35 : 1; ctx.fillStyle = '#070a12'; ctx.fillRect(x - 11, y - 11, 22, 22); ctx.strokeStyle = k.c; ctx.lineWidth = 2; ctx.strokeRect(x - 10, y - 10, 20, 20);
+  ctx.fillStyle = k.c; ctx.font = '700 14px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(k.ch, x, y + 1); ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+}
 function drawDoors() {
   const doors = [];
-  if (G.room.doors.N) doors.push([5 * TILE, 0, 2 * TILE, TILE, 'h']); if (G.room.doors.S) doors.push([5 * TILE, RH - TILE, 2 * TILE, TILE, 'h']);
-  if (G.room.doors.W) doors.push([0, 8 * TILE, TILE, 2 * TILE, 'v']); if (G.room.doors.E) doors.push([RW - TILE, 8 * TILE, TILE, 2 * TILE, 'v']);
-  for (const [x, y, w, h, o] of doors) {
-    if (G.open) { ctx.fillStyle = '#070a12'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = COL.doorOpen; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(G.time * 5); ctx.strokeRect(x + 2, y + 2, w - 4, h - 4); ctx.globalAlpha = 1; }
+  if (G.room.doors.N) doors.push([5 * TILE, 0, 2 * TILE, TILE, 'h', 'N']); if (G.room.doors.S) doors.push([5 * TILE, RH - TILE, 2 * TILE, TILE, 'h', 'S']);
+  if (G.room.doors.W) doors.push([0, 8 * TILE, TILE, 2 * TILE, 'v', 'W']); if (G.room.doors.E) doors.push([RW - TILE, 8 * TILE, TILE, 2 * TILE, 'v', 'E']);
+  for (const [x, y, w, h, o, dir] of doors) {
+    if (G.open) { ctx.fillStyle = '#070a12'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = COL.doorOpen; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(G.time * 5); ctx.strokeRect(x + 2, y + 2, w - 4, h - 4); ctx.globalAlpha = 1;
+      const nb = G.floor ? neighbor(G.room, dir) : null; const kind = nb ? roomKind(nb) : null;   // 隣の部屋の中身を看板で見せる（Hades の「次の扉を報酬で選ぶ」）
+      if (kind && !(nb.type === 'normal' && nb.rewardTaken)) sign(x + w / 2, y + h / 2, kind, nb.type === 'shop' && nb.items && nb.items.every(it => it.sold) || nb.type === 'treasure' && nb.rewardTaken);
+    }
     else { ctx.fillStyle = '#3a1020'; ctx.fillRect(x, y, w, h); ctx.fillStyle = COL.doorClosed; if (o === 'h') { ctx.fillRect(x, y + 8, w, 6); ctx.fillRect(x, y + 18, w, 6); } else { ctx.fillRect(x + 8, y, 6, h); ctx.fillRect(x + 18, y, 6, h); } }
   }
 }
 function tri(x, y, r, a) { ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); ctx.lineTo(x + Math.cos(a + 2.4) * r, y + Math.sin(a + 2.4) * r); ctx.lineTo(x + Math.cos(a - 2.4) * r, y + Math.sin(a - 2.4) * r); ctx.closePath(); }
 function dia(x, y, r) { ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); }
+function hex(x, y, r, a) { ctx.beginPath(); for (let i = 0; i < 6; i++) { const t = a + i * Math.PI / 3; if (i === 0) ctx.moveTo(x + Math.cos(t) * r, y + Math.sin(t) * r); else ctx.lineTo(x + Math.cos(t) * r, y + Math.sin(t) * r); } ctx.closePath(); }
 function drawEnemy(e) {
+  if (e.type === 'boss') { drawBoss(e); return; }
   const col = e.type === 'rusher' ? COL.rusher : COL.shooter;
   if (e.st === 'spawn') { const k = 1 - Math.max(0, e.t) / 0.9; ctx.strokeStyle = col; ctx.globalAlpha = 0.3 + 0.6 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + (1 - k) * 22, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; return; }
   if (e.type === 'shooter' && e.st === 'aim') { const k = 1 - e.t / TUNE.shooter.aimT; ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.25 + 0.6 * k; ctx.lineWidth = e.t <= TUNE.shooter.lockT ? 2.5 : 1; if (e.t > TUNE.shooter.lockT) ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.ax, e.ay); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
@@ -463,6 +722,21 @@ function drawEnemy(e) {
   if (e.st === 'tell') { ctx.fillStyle = COL.white; ctx.font = '700 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 6); }
   if (e.hp < e.maxHp) { ctx.fillStyle = '#000'; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24, 3); ctx.fillStyle = col; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24 * e.hp / e.maxHp, 3); }
 }
+function drawBoss(e) {
+  const B = TUNE.boss;
+  if (e.st === 'spawn') { const k = 1 - Math.max(0, e.t) / 1.5; ctx.strokeStyle = COL.boss; ctx.globalAlpha = 0.3 + 0.6 * k; ctx.lineWidth = 3; ctx.setLineDash([6, 6]); hex(e.x, e.y, e.r + (1 - k) * 60, e.t); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; return; }
+  const tell = e.st === 'tell', k = tell ? 1 - e.t / (e.tellT || 1) : 0;
+  if (tell && e.pat === 'ring') { ctx.strokeStyle = COL.ebullet; ctx.globalAlpha = 0.25 + 0.5 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 8]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 14 + k * 30, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  if (tell && e.pat === 'charge') { ctx.strokeStyle = COL.boss; ctx.globalAlpha = 0.3 + 0.5 * k; ctx.lineWidth = 3; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(e.face) * 600, e.y + Math.sin(e.face) * 600); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  if (tell && e.pat === 'volley') { ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.3 + 0.5 * k; ctx.lineWidth = k > 0.7 ? 2.5 : 1; ctx.setLineDash([6, 6]); for (let i = 0; i < B.volleyN; i++) { const a = e.face + (i - (B.volleyN - 1) / 2) * 0.16; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(a) * 500, e.y + Math.sin(a) * 500); ctx.stroke(); } ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  if (e.st === 'charge') { ctx.globalAlpha = 0.25; ctx.fillStyle = COL.boss; hex(e.x - e.dx * 22, e.y - e.dy * 22, e.r, 0); ctx.fill(); ctx.globalAlpha = 1; }
+  const flash = e.flash > 0 || (tell && Math.floor(e.t * 14) % 2 === 0);
+  ctx.globalAlpha = 0.18; ctx.fillStyle = e.enraged ? COL.boss : COL.portal; ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 10 + Math.sin(G.time * 6) * 3, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = flash ? COL.white : (e.enraged ? '#c8103f' : '#8a1040'); hex(e.x, e.y, e.r, e.face); ctx.fill();
+  ctx.strokeStyle = e.enraged ? COL.boss : COL.portal; ctx.lineWidth = 3; hex(e.x, e.y, e.r, e.face); ctx.stroke();
+  ctx.fillStyle = COL.player; ctx.beginPath(); ctx.arc(e.x + Math.cos(e.face) * 10, e.y + Math.sin(e.face) * 10, 5, 0, 6.2832); ctx.fill();
+  if (tell) { ctx.fillStyle = COL.white; ctx.font = '700 18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 10); }
+}
 function drawPlayer() {
   if (!player.alive || G.mode === 'title') return;
   if (player.inv > 0 && Math.floor(player.inv * 12) % 2 === 0) return;
@@ -471,7 +745,23 @@ function drawPlayer() {
   ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill();
   ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * 6, player.y + Math.sin(player.ang) * 6); ctx.lineTo(player.x + Math.cos(player.ang) * 18, player.y + Math.sin(player.ang) * 18); ctx.stroke();
   if (!player.moving && G.mode === 'run') { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
-  if (player.dashCool > 0 && player.dashT <= 0) { const k = 1 - player.dashCool / (TUNE.dash.t + TUNE.dash.cool); ctx.strokeStyle = COL.white; ctx.globalAlpha = 0.45; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 8, -Math.PI / 2, -Math.PI / 2 + 6.2832 * k); ctx.stroke(); ctx.globalAlpha = 1; }   // ダッシュ再使用までのリング
+  if (player.dashCool > 0 && player.dashT <= 0) { const k = 1 - player.dashCool / (TUNE.dash.t + D.dashCool); ctx.strokeStyle = COL.white; ctx.globalAlpha = 0.45; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 8, -Math.PI / 2, -Math.PI / 2 + 6.2832 * k); ctx.stroke(); ctx.globalAlpha = 1; }   // ダッシュ再使用までのリング
+}
+function drawPickups() {
+  for (const p of G.pickups) {
+    if (p.kind === 'scrap') { ctx.fillStyle = COL.scrap; dia(p.x, p.y, 5 + Math.sin(p.t * 8) * 1); ctx.fill(); ctx.fillStyle = '#7a5a00'; dia(p.x, p.y, 2); ctx.fill(); continue; }
+    const k = RK[p.rk]; ctx.strokeStyle = k.c; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(p.t * 5); ctx.beginPath(); ctx.arc(p.x, p.y, 18 + Math.sin(p.t * 5) * 2, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
+    sign(p.x, p.y, p.rk, false);
+    ctx.fillStyle = k.c; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(k.label + (p.rk === 'scrap' ? ' +' + (TUNE.loot.scrapReward + TUNE.loot.scrapPerFloor * G.floorIdx) : p.rk === 'heal' ? ' +' + TUNE.loot.heal : ''), p.x, p.y + 34);
+  }
+  for (const ped of G.peds) {
+    ctx.fillStyle = '#1b2a4a'; ctx.beginPath(); ctx.arc(ped.x, ped.y, 17, 0, 6.2832); ctx.fill(); ctx.strokeStyle = ped.kind === 'treasure' ? COL.treasure : COL.shop; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(ped.t * 4); ctx.beginPath(); ctx.arc(ped.x, ped.y, 20, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
+    if (ped.kind === 'treasure') { sign(ped.x, ped.y, 'treasure', false); ctx.fillStyle = COL.treasure; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('3つから1つ選ぶ', ped.x, ped.y + 36); }
+    else { const it = ped.item, fam = it.kind === 'heal' ? 'heal' : PART[it.id].fam; sign(ped.x, ped.y, fam, false);
+      ctx.fillStyle = COL.text; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(itemName(it), ped.x, ped.y + 36);
+      const maxed = it.kind === 'part' && lv(it.id) >= TUNE.parts.maxLv;
+      ctx.fillStyle = maxed ? COL.mut : G.scrap >= it.price ? COL.scrap : COL.mut; ctx.font = '700 12px Menlo, monospace'; ctx.fillText(maxed ? 'MAX' : '◆' + it.price, ped.x, ped.y + 50); }
+  }
 }
 function drawWorld() {
   ctx.save();
@@ -479,67 +769,115 @@ function drawWorld() {
   ctx.drawImage(stat, L.ox + sx, L.oy + sy, RW * L.s, RH * L.s);
   ctx.translate(L.ox + sx, L.oy + sy); ctx.scale(L.s, L.s);
   drawDoors();
-  if (G.portal) { const t = G.portal.t; ctx.strokeStyle = COL.portal; ctx.lineWidth = 3; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 18 + Math.sin(t * 4) * 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 30 + Math.sin(t * 4 + 1) * 4, t, t + 4); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = COL.portal; ctx.font = '600 10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('EXIT', G.portal.x, G.portal.y + 48); }
+  if (G.portal) { const t = G.portal.t; ctx.strokeStyle = COL.portal; ctx.lineWidth = 3; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 18 + Math.sin(t * 4) * 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 30 + Math.sin(t * 4 + 1) * 4, t, t + 4); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = COL.portal; ctx.font = '600 10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.portal.end ? 'END' : 'NEXT FLOOR', G.portal.x, G.portal.y + 48); }
+  drawPickups();
   for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.col; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); } ctx.globalAlpha = 1;
   for (const e of enemies) drawEnemy(e);
-  for (const b of bullets) { if (b.from === 'p') { ctx.strokeStyle = COL.pbullet; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * 0.016, b.y - b.vy * 0.016); ctx.stroke(); } else { ctx.fillStyle = COL.ebullet; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.2832); ctx.fill(); ctx.fillStyle = '#7a4a00'; ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, 6.2832); ctx.fill(); } }
+  for (const b of bullets) { if (b.from === 'p') { ctx.strokeStyle = b.dmg > 1 ? COL.mod : COL.pbullet; ctx.lineWidth = b.dmg > 1 ? 4 : 3; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * 0.016, b.y - b.vy * 0.016); ctx.stroke(); } else { ctx.fillStyle = COL.ebullet; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.2832); ctx.fill(); ctx.fillStyle = '#7a4a00'; ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, 6.2832); ctx.fill(); } }
   drawPlayer();
+  for (const f of G.floats) { ctx.globalAlpha = Math.max(0, Math.min(1, f.t / 0.4)); ctx.fillStyle = f.col; ctx.font = '700 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.text, f.x, f.y); } ctx.globalAlpha = 1;
+  if (G.boss && G.boss.st !== 'spawn') { const w = RW - 60, x = 30, y = 10; ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, w, 8); ctx.fillStyle = G.boss.enraged ? COL.boss : COL.portal; ctx.fillRect(x, y, w * Math.max(0, G.boss.hp / G.boss.maxHp), 8); ctx.strokeStyle = COL.white; ctx.lineWidth = 1; ctx.globalAlpha = 0.5; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, 7); ctx.globalAlpha = 1; }
   ctx.restore();
 }
 function drawStick() { if (!stick.on || G.mode !== 'run') return; ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 48, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.55; ctx.fillStyle = COL.player; const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy), k = d > 48 ? 48 / d : 1; ctx.beginPath(); ctx.arc(stick.ox + dx * k, stick.oy + dy * k, 16, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
 function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + (s < 10 ? '0' : '') + s; }
 function drawHUD() {
   layoutButtons();
-  // 上帯
+  // 上帯＝HP・スクラップ／フロア・部屋・撃破・時間
   ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, 0, L.w, L.topH);
   for (let i = 0; i < player.maxHp; i++) { const x = 14 + i * 20, y = L.sat + 16; ctx.fillStyle = i < player.hp ? COL.hp : '#2a3350'; dia(x + 7, y + 7, 7); ctx.fill(); }
-  ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  if (G.floor) ctx.fillText('ROOM ' + G.roomsVisited + '/' + G.floor.n + '   KILL ' + G.kills + '   ' + fmt(G.time), 14, L.sat + 52);
+  const sxp = 14 + player.maxHp * 20 + 10; ctx.fillStyle = COL.scrap; dia(sxp + 6, L.sat + 23, 6); ctx.fill(); ctx.font = '700 13px Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(String(G.scrap), sxp + 16, L.sat + 28);
+  ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left';
+  if (G.floor) ctx.fillText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '   ROOM ' + G.roomsVisited + '/' + G.floor.n + '   KILL ' + G.kills + '   ' + fmt(G.time), 14, L.sat + 52);
   for (const [b, label] of [[BTN.sound, S.sound ? '♪' : '✕'], [BTN.pause, G.mode === 'pause' ? '▶' : '❚❚']]) { ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1); ctx.fillStyle = COL.text; ctx.font = '600 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, b.x + b.w / 2, b.y + 25); }
-  // 下帯
+  // 下帯＝部品の列／計器／ミニマップ
   ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, L.h - L.botH, L.w, L.botH);
   if (G.floor) { const cs = 11, gap = 3, size = GRID * cs + (GRID - 1) * gap, mx = L.w - 14 - size, my = L.h - L.sab - 10 - size;
     for (const r of G.floor.list) { const known = r.visited || Object.keys(r.doors).some(k => { const nb = neighbor(r, k); return nb && nb.visited; }); if (!known) continue;
-      const x = mx + r.gx * (cs + gap), y = my + r.gy * (cs + gap);
-      if (r === G.room) ctx.fillStyle = COL.player; else if (r.visited) ctx.fillStyle = (r.type === 'exit') ? COL.portal : '#3a5590'; else ctx.fillStyle = '#1a2340';
-      ctx.fillRect(x, y, cs, cs); if (!r.visited) { ctx.strokeStyle = '#3a5590'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1); }
-      if (r.type === 'exit' && r.visited && r !== G.room) { ctx.fillStyle = '#0b0f1a'; ctx.fillRect(x + 4, y + 4, 3, 3); } }
-    ctx.fillStyle = COL.mut; ctx.font = '500 9px sans-serif'; ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4); }
+      const x = mx + r.gx * (cs + gap), y = my + r.gy * (cs + gap); const kind = roomKind(r); const kc = kind && RK[kind] && (r.type !== 'normal') ? RK[kind].c : null;
+      if (r === G.room) ctx.fillStyle = COL.player; else if (r.visited) ctx.fillStyle = kc || '#3a5590'; else ctx.fillStyle = '#1a2340';
+      ctx.fillRect(x, y, cs, cs);
+      if (!r.visited) { ctx.strokeStyle = kc || (kind ? RK[kind].c : '#3a5590'); ctx.lineWidth = 1; ctx.globalAlpha = kc ? 1 : 0.7; ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1); ctx.globalAlpha = 1; }
+      if (r.visited && r !== G.room && kc) { ctx.fillStyle = '#0b0f1a'; ctx.fillRect(x + 4, y + 4, 3, 3); } }
+    ctx.fillStyle = COL.mut; ctx.font = '500 9px sans-serif'; ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4);
+    // 部品の列（所持している部品＝1文字＋Lv）
+    let px = 14, py = L.h - L.sab - 60; const pxMax = L.w - 14 - size - 40;
+    for (const p of PARTS) { const n = lv(p.id); if (!n) continue; if (px > pxMax) { px = 14; py -= 21; } ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(px, py, 34, 18); ctx.strokeStyle = RK[p.fam].c; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, 33, 17); ctx.fillStyle = RK[p.fam].c; ctx.font = '700 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.short + (n > 1 ? '×' + n : ''), px + 5, py + 13); px += 38; }
+  }
   ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace';
-  if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl : '') + '  sa ' + L.satRaw + '/' + L.sabRaw + '\u2192' + L.sat + '/' + L.sab + '  win ' + L.w + 'x' + L.h + (isStandalone() ? ' sa-mode' : ''), 14, L.h - L.sab - 17); }
+  if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl + ' ' + G.room.type : '') + '  sa ' + L.satRaw + '/' + L.sabRaw + '→' + L.sat + '/' + L.sab + '  win ' + L.w + 'x' + L.h + (isStandalone() ? ' sa-mode' : ''), 14, L.h - L.sab - 17); }
   ctx.fillText(VERSION, 14, L.h - L.sab - 5);
   // バナー
-  if (G.banner) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = '700 22px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.topH + 40); ctx.globalAlpha = 1; }
+  if (G.banner && G.mode === 'run') { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = '700 22px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.oy + 100); ctx.globalAlpha = 1; }   // 部屋の上寄り（上帯の直下に置くと北の扉の看板と重なる）
 }
 function overlay(alpha) { ctx.fillStyle = 'rgba(5,8,16,' + alpha + ')'; ctx.fillRect(0, 0, L.w, L.h); }
 function centerText(text, y, font, col, alpha) { ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.fillStyle = col || COL.text; ctx.font = font; ctx.textAlign = 'center'; ctx.fillText(text, L.w / 2, y); ctx.globalAlpha = 1; }
+function button(label, y, act, col, sub) {   // 中央寄せの大きなボタン（片手で押せる高さ）
+  const w = Math.min(300, L.w - 60), h = sub ? 56 : 48, x = (L.w - w) / 2; UI.push({ x, y, w, h, act });
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col || '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  centerText(label, y + (sub ? 24 : 31), '600 16px -apple-system, "Hiragino Sans", sans-serif', col ? col : COL.text);
+  if (sub) centerText(sub, y + 44, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+  return y + h + 10;
+}
 function drawOverlays() {
   const cy = L.h / 2, blink = 0.55 + 0.45 * Math.sin(performance.now() / 300);
+  UI.length = 0;
   if (G.mode === 'title') {
     overlay(0.55);
-    centerText('PRINT RUN', cy - 70, '800 44px -apple-system, "Hiragino Sans", sans-serif', COL.player);
-    centerText('―弾丸輪廻―', cy - 38, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text);
-    centerText('タップして開始', cy + 20, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
-    centerText('指で動く ＝ 避ける　／　離す（止まる）＝ 撃つ', cy + 56, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('フリック（弾いて離す）＝ その方向へダッシュ（無敵）　／　一時停止で操作を切替', cy + 76, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('部屋の敵を全滅させると扉が開く。EXIT の部屋を目指せ', cy + 96, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('通算　刷 ' + S.runs + '　撃破 ' + S.kills + '　クリア ' + S.clears + '　最多到達 ' + S.bestRooms + '部屋', cy + 120, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText(VERSION + '  Phase 1 縦切り', cy + 142, '500 11px Menlo, monospace', COL.mut);
+    centerText('PRINT RUN', cy - 150, '800 44px -apple-system, "Hiragino Sans", sans-serif', COL.player);
+    centerText('―弾丸輪廻―', cy - 118, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text);
+    let y = cy - 86;
+    if (G.saved) y = button('続きから', y, () => resumeRun(G.saved), COL.player, (G.saved.floor + 1 >= TUNE.floors.length ? 'FINAL' : 'FLOOR ' + (G.saved.floor + 1)) + '　HP ' + G.saved.hp + '/' + G.saved.maxHp + '　◆' + G.saved.scrap + '　' + fmt(G.saved.time));
+    y = button(G.saved ? '新しい刷（続きは消える）' : '新しい刷', y, () => { clearRun(); newRun(); }, G.saved ? null : COL.player);
+    centerText('動く＝避ける　止まる＝撃つ　フリック＝ダッシュ', y + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('扉の看板 ＝ 隣の部屋にあるもの', y + 34, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('義 義体　改 銃改造　材 スクラップ　回 回復', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('商 商人　宝 宝物庫　出 出口　王 ボス', y + 66, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('3フロアを抜けてボスを倒せ。中断しても部屋の入口から再開', y + 86, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　貯蔵 ◆' + S.scrapBank, y + 110, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText(VERSION + '  Phase 2 ラン構造', y + 130, '500 11px Menlo, monospace', COL.mut);
   } else if (G.mode === 'pause') {
-    overlay(0.7); centerText('一時停止', cy - 120, '700 26px -apple-system, "Hiragino Sans", sans-serif');
-    MENU.length = 0; const items = [['再開', () => { G.mode = 'run'; }], ['新しい刷（やり直す）', () => newRun()], ['音: ' + (S.sound ? 'ON' : 'OFF'), () => setSound(!S.sound)], ['計器: ' + (S.meter ? 'ON' : 'OFF'), () => { S.meter = !S.meter; save(); }], ['ダッシュ操作: ' + ({ tap: 'タップ', flick: 'フリック', both: '両方' })[S.dashInput], () => { S.dashInput = ({ tap: 'flick', flick: 'both', both: 'tap' })[S.dashInput] || 'tap'; save(); }]];
-    items.forEach(([label, act], i) => { const w = Math.min(280, L.w - 60), h = 48, x = (L.w - w) / 2, y = cy - 70 + i * 58; MENU.push({ x, y, w, h, act }); ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = '#2a3a60'; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); centerText(label, y + 31, '600 16px -apple-system, "Hiragino Sans", sans-serif'); });
+    overlay(0.7); centerText('一時停止', cy - 190, '700 26px -apple-system, "Hiragino Sans", sans-serif');
+    let y = cy - 150;
+    y = button('再開', y, () => { G.mode = 'run'; });
+    y = button('音: ' + (S.sound ? 'ON' : 'OFF'), y, () => setSound(!S.sound));
+    y = button('計器: ' + (S.meter ? 'ON' : 'OFF'), y, () => { S.meter = !S.meter; save(); });
+    y = button('ダッシュ操作: ' + ({ tap: 'タップ', flick: 'フリック', both: '両方' })[S.dashInput], y, () => { S.dashInput = ({ tap: 'flick', flick: 'both', both: 'tap' })[S.dashInput] || 'tap'; save(); });
+    y = button('タイトルへ', y, () => goTitle(), null, '中断セーブ＝この部屋の入口から再開できる');
+    y = button('やり直す（今の刷を捨てる）', y, () => { clearRun(); newRun(); }, COL.doorClosed);
+  } else if (G.mode === 'choose' && G.choice) {
+    overlay(0.78); const c = G.choice;
+    centerText(c.fam === 'implant' ? '義体を選ぶ' : c.fam === 'mod' ? '銃改造を選ぶ' : '報酬を選ぶ（義体か銃改造）', cy - 170, '700 22px -apple-system, "Hiragino Sans", sans-serif');
+    centerText('1つだけ持ち帰れる', cy - 148, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    const w = Math.min(320, L.w - 40), h = 84, x = (L.w - w) / 2; let y = cy - 120;
+    c.opts.forEach((p, i) => {
+      const col = RK[p.fam].c; UI.push({ x, y, w, h, act: () => pickChoice(p) });
+      ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+      sign(x + 24, y + 30, p.fam, false);
+      ctx.fillStyle = col; ctx.font = '700 16px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.name, x + 46, y + 30);
+      ctx.fillStyle = COL.mut; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'right'; ctx.fillText(lv(p.id) ? 'Lv' + lv(p.id) + ' → ' + (lv(p.id) + 1) : 'NEW', x + w - 12, y + 30);
+      ctx.fillStyle = COL.text; ctx.font = '500 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.desc, x + 46, y + 56);
+      y += h + 12;
+    });
   } else if (G.mode === 'dead') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
     if (G.overlayT > 0.4) { centerText('刷り直し', cy - 60, '800 40px -apple-system, "Hiragino Sans", sans-serif', COL.doorClosed, a); centerText('REPRINT', cy - 34, '600 12px Menlo, monospace', COL.mut, a);
-      centerText('到達 ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy + 10, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
-      if (G.overlayT > 0.7) centerText('タップで次の刷', cy + 60, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink); }
-  } else if (G.mode === 'clear') {
+      centerText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '　ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy + 10, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
+      centerText('スクラップ ◆' + G.scrap + ' を印刷所へ持ち帰った（貯蔵 ◆' + S.scrapBank + '）', cy + 34, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.scrap, a);
+      if (G.overlayT > 0.7) centerText('タップで印刷所へ', cy + 70, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink); }
+  } else if (G.mode === 'floorclear') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.6 * a);
-    centerText('FLOOR CLEAR', cy - 60, '800 36px -apple-system, "Hiragino Sans", sans-serif', COL.portal, a);
-    centerText('部屋 ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy - 10, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
-    centerText('次のフロアは Phase 2 で。', cy + 20, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
-    if (G.overlayT > 0.7) centerText('タップで次の刷', cy + 60, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
+    centerText('FLOOR ' + (G.floorIdx + 1) + ' CLEAR', cy - 60, '800 36px -apple-system, "Hiragino Sans", sans-serif', COL.portal, a);
+    centerText('部屋 ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　◆' + G.scrap + '　' + fmt(G.time), cy - 10, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
+    centerText(G.floorIdx + 2 >= TUNE.floors.length ? '次は最終フロア＝ボス' : '次は FLOOR ' + (G.floorIdx + 2), cy + 20, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
+    if (G.overlayT > 0.7) centerText('タップで降りる', cy + 60, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
+  } else if (G.mode === 'win') {
+    const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
+    centerText('PRINT COMPLETE', cy - 70, '800 36px -apple-system, "Hiragino Sans", sans-serif', COL.player, a);
+    centerText('この義体は最後まで刷り上がった', cy - 42, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
+    centerText('撃破 ' + G.kills + '　' + fmt(G.time) + '　部品 ' + Object.keys(G.parts).length + '種', cy + 0, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
+    centerText('スクラップ ◆' + G.scrap + ' を印刷所へ持ち帰った（貯蔵 ◆' + S.scrapBank + '）', cy + 24, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.scrap, a);
+    if (G.overlayT > 0.7) centerText('タップで印刷所へ', cy + 64, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
   }
 }
 function draw() {
@@ -556,18 +894,19 @@ function meter(js, dt) { M.js.push(js); M.dts.push(dt); if (M.js.length > 60) { 
 let last = performance.now();
 function frame(t) {
   requestAnimationFrame(frame); const t0 = performance.now(); let dt = (t - last) / 1000; last = t; if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
-  if (G.mode === 'run') update(dt); else if (G.mode === 'dead' || G.mode === 'clear') updateFx(dt);
+  if (G.mode === 'run') update(dt); else if (G.mode === 'dead' || G.mode === 'floorclear' || G.mode === 'win') updateFx(dt);
   draw(); meter(performance.now() - t0, dt); if ((M.js.length % 30) === 0) relayoutIfChanged();
 }
 
 // ---------- デバッグ用フック（PC確認用・ゲームには影響しない）----------
-const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, S, M, newRun, god: false, forced: null,
-  setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { enemies.length = 0; },
-  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout };
+const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, S, M, D, newRun, nextFloor, resumeRun, loadRun, saveRun, clearRun, genFloor, god: false, forced: null,
+  setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { while (enemies.length) killEnemy(enemies.length - 1); },
+  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom };
 
 // ---------- 起動 ----------
 layout();
-if (!G.tiles) { /* タイトル背景用に仮の部屋を1つ描いておく */ G.rng = mulberry32(12345); G.floor = genFloor(G.rng); G.room = G.floor.start; G.tiles = buildTiles(G.room); G.open = true; renderStatic(); G.floor = null; }
+if (!G.tiles) { /* タイトル背景用に仮の部屋を1つ描いておく */ G.seed = 12345; G.floor = genFloor(0); G.room = G.floor.start; G.tiles = buildTiles(G.room); G.open = true; renderStatic(); G.floor = null; G.seed = 0; }
+G.saved = loadRun();
 requestAnimationFrame(frame);
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) { navigator.serviceWorker.register('./sw.js').catch(() => { }); }
 </script>
