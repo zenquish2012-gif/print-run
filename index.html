@@ -26,14 +26,15 @@
 <script>
 'use strict';
 /* =====================================================================
-   PRINT RUN ―弾丸輪廻―  Phase 3a お店経営の最小ループ（p3a）
-   Phase 2（フロア3＋ボス・部屋7〜12・商人・宝物庫・扉の看板・ラン内成長・スクラップ・中断セーブ）の上に、
-   拠点＝印刷所（歩ける・台座5つ＝出撃口・店・倉庫・工房・住人）／品（売り物）を拾う持ち帰り枠（満杯なら入れ替え）／
-   倉庫／店の1日（棚に並べ→値付け3段階→開店→客の反応→売る）／金（Cr）／工房＝銃4種（恒久）＋枠の拡張／
-   フロア出口で「帰る／進む」／死ぬと品だけ失う（設計図・スクラップ・型は残る）／住人の1行／データの書き出し・読み込み を載せた。
+   PRINT RUN ―弾丸輪廻―  Phase 3c-1 ビルドの骨（p3c1）＝MH Wilds型ビルドシステムの骨（要件定義 #20〜#27・R10〜R20）
+   Phase 3a（拠点＝印刷所・品・持ち帰り枠・倉庫・店の1日・金・工房＝銃4種・住人・帰る/進む・死亡ロスト・書き出し/読み込み）の上に、
+   スキル表1本（SKILLS＝義体スキル11＋銃スキル5。恒久＝装備の土台Lv／パッチ＝ラン中だけ+Lv・上限超え＝オーバークロック）／
+   義体5部位（頭・胴・腕・腰・脚＝仕組みのダイヤル）×3段（標準・街路型・王型）＝型（GEAR）を素材（＝品）と金で「焼き込む」／
+   銃＝基礎値＋段1の焼き込み（性格スキル+1）／品の出どころを敵の型に紐づけ（突進型＝電池セル・射撃型＝記憶チップ・宝物庫・深いフロア・ボス＝王のコア）／
+   工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p3a-0.1.1';
+const VERSION = 'p3c1-0.1.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -58,9 +59,10 @@ const TUNE = {
   boss:    { hp: 220, hpPerMod: 0.35, r: 26, spd: 55, tell: 0.7, rest: 0.9, ringN: 12, ringSpd: 175, chargeSpd: 560, chargeT: 0.55, volleyN: 3, volleySpd: 330, enrageAt: 0.5, contact: 1,
              ringGapDeg: 80, ringGapEnraged: 20, ringLaneMinOff: 45, ringLaneMaxOff: 100, ringTellK: 1.5, ringWithMinions: false }, // ボス: HP（＋銃改造の合計Lv×hpPerMod 倍＝ビルドが強いほど長く戦う）／半径／歩く速さ／予兆(秒)／技の間(秒)／放射弾の数・速さ／突進の速さ・時間／三連射の数・速さ／怒りに入るHP割合。p2-0.2.0（マスター「放射弾は逃げるスペースがない」）＝放射弾に「安全な扇（レーン）」を開ける＝幅 ringGapDeg 度（怒り時＋ringGapEnraged）・向きは主人公の方向から ringLaneMinOff〜ringLaneMaxOff 度ずらす（動かないと当たる・扇の縁まで最大 maxOff−gap/2 度＝半径140pxで約150px＝予兆の間に歩いて届く）・予兆は tell×ringTellK 秒で扇を見せる／ringWithMinions=false＝手下が生きている間は放射弾を撃たない（突進・三連射のみ）
   loot:    { scrapDrop: 0.35, scrapReward: 4, scrapPerFloor: 2, heal: 2, pricePart: 5, priceHeal: 3, priceStep: 1, bossScrap: 12 }, // 撃破時のスクラップ落下率／部屋報酬のスクラップ（＋フロア×2）／回復量／商人の値段（＋フロア×step）。p2-0.2.0＝マスター「貯まり方に対して少し高い」で 7/4/2 → 5/3/1（部品 5→6→7・回復 3→4→5）
-  parts:   { maxLv: 3, nanoNeed: 4 },                                                             // 部品の最大レベル／修復ナノ＝部屋クリア (nanoNeed−Lv) 回ごとに HP+1
-  bag:     { base: 10, max: 20, step: 2, price: 30 },                                             // 持ち帰り枠（Phase 3a）＝初期／上限／工房で買う1回の増分／値段（Cr）
-  goods:   { perRoom: [1, 2], treasure: 3, boss: 3 },                                             // 品の出方＝戦闘部屋クリアで1〜2個・宝物庫3個・ボス撃破3個
+  parts:   { maxLv: 3, nanoNeed: 4 },                                                             // パッチ（ラン内）の最大レベル／修復ナノ＝部屋クリア (nanoNeed−Lv) 回ごとに HP+1
+  skills:  { max: 3, overclock: 2 },                                                              // スキルの上限（恒久＝装備の合計はここまで）／パッチで上限を超えられる段数＝オーバークロック（合計 max+overclock まで・要件定義 #22）
+  bag:     { base: 10, max: 30, step: 2, price: 30 },                                             // 持ち帰り枠＝初期／安全上限／（旧版で買った枠の増分・値段＝3c-1 で腰の「積載」へ吸収・S.bagBonus に変換）
+  goods:   { perRoom: [1, 2], treasure: 3, boss: 3, deepLens: 0.12, deepCore: 0.06 },             // 品の出方＝戦闘部屋クリアで1〜2個（出どころ＝その部屋の敵の型。フロア2以降は deepLens×フロア の確率で光学レンズ・フロア3以降は +deepCore で義体コア）・宝物庫3個・ボス撃破3個（王のコア1個は必ず）
   shop:    { shelves: 3, stack: 5, customers: 8, interval: 2.6, walkT: 0.9, tiers: { low: { k: 0.7, p: 1.0, label: '安' }, mid: { k: 1.0, p: 0.8, label: '適' }, high: { k: 1.4, p: 0.4, label: '高' } } },   // 店の1日＝棚3・1棚の上限・客の人数・来店の間隔(秒)・歩く時間・値付け3段階（価格倍率・買う確率）
 };
 const COL = {
@@ -71,8 +73,8 @@ const COL = {
 };
 // 報酬・部屋の種類の見せ方（扉の看板・ミニマップ・拾い物で共通）
 const RK = {
-  implant:  { c: COL.implant,  ch: '義', label: '義体' },
-  mod:      { c: COL.mod,      ch: '改', label: '銃改造' },
+  implant:  { c: COL.implant,  ch: '義', label: '義体パッチ' },
+  mod:      { c: COL.mod,      ch: '改', label: '銃パッチ' },
   scrap:    { c: COL.scrap,    ch: '材', label: 'スクラップ' },
   heal:     { c: COL.heal,     ch: '回', label: '回復' },
   shop:     { c: COL.shop,     ch: '商', label: '商人' },
@@ -80,35 +82,74 @@ const RK = {
   exit:     { c: COL.exit,     ch: '出', label: '出口' },
   boss:     { c: COL.boss,     ch: '王', label: 'ボス' },
 };
-// 部品（ラン内成長）＝義体（implant）と銃改造（mod）。どちらも「射撃と回避の挙動を変える」1つの系に束ねる（要件定義 #5）
-const PARTS = [
-  { id: 'legs',   fam: 'implant', short: '脚', name: '脚部アクチュエータ', desc: '移動速度 +12%' },
-  { id: 'reflex', fam: 'implant', short: '反', name: '反射神経ブースト',   desc: 'ダッシュの再使用が 30% 早くなる' },
-  { id: 'armor',  fam: 'implant', short: '装', name: '装甲皮膚',           desc: '最大HP +1（HP も 1 回復）' },
-  { id: 'skin',   fam: 'implant', short: '硬', name: '硬化外皮',           desc: '被弾後の無敵時間 +40%' },
-  { id: 'nano',   fam: 'implant', short: '修', name: '修復ナノマシン',     desc: '部屋を 3 つクリアするごとに HP +1（Lvで短縮）' },
-  { id: 'rate',   fam: 'mod',     short: '連', name: '高速機関部',         desc: '連射 +25%' },
-  { id: 'dmg',    fam: 'mod',     short: '威', name: '大口径弾',           desc: '弾の威力 +1' },
-  { id: 'pierce', fam: 'mod',     short: '貫', name: '徹甲弾',             desc: '弾が敵を 1 体 貫通する' },
-  { id: 'multi',  fam: 'mod',     short: '多', name: '多銃身',             desc: '同時に撃つ弾 +1（扇状に広がる）' },
-  { id: 'range',  fam: 'mod',     short: '射', name: '長銃身',             desc: '射程 +25%・弾速 +15%' },
+// スキル表（3c-1・R10）＝効果の唯一の置き場。恒久（義体5部位・銃の段）が土台Lv、パッチ（ラン内の3択）が一時+Lv。fam＝implant（義体スキル＝身体系・5部位に付く）／mod（銃スキル＝射撃系・銃に付く）＝Wildsの分離（R11）。part＝主に載る部位
+const SKILLS = [
+  { id: 'aim',    fam: 'implant', part: 'head',  short: '照', name: '照準ユニット',       desc: '射程 +15%（自動照準が届く距離も伸びる）' },
+  { id: 'fore',   fam: 'implant', part: 'head',  short: '先', name: '先読み回路',         desc: '敵の予兆が 15% 長く見える' },
+  { id: 'armor',  fam: 'implant', part: 'body',  short: '装', name: '装甲皮膚',           desc: '最大HP +1（HP も 1 回復）' },
+  { id: 'skin',   fam: 'implant', part: 'body',  short: '硬', name: '硬化外皮',           desc: '被弾後の無敵時間 +40%' },
+  { id: 'nano',   fam: 'implant', part: 'body',  short: '修', name: '修復ナノマシン',     desc: '部屋を 3 つクリアするごとに HP +1（Lvで短縮）' },
+  { id: 'steady', fam: 'implant', part: 'arms',  short: '安', name: '安定化アーム',       desc: '弾の拡散 −25%（近距離向きの銃が遠くにも届く）' },
+  { id: 'quick',  fam: 'implant', part: 'arms',  short: '速', name: '速射リンク',         desc: '連射 +12%' },
+  { id: 'cargo',  fam: 'implant', part: 'waist', short: '積', name: '積載フレーム',       desc: '持ち帰り枠 +2' },
+  { id: 'magnet', fam: 'implant', part: 'waist', short: '吸', name: '回収マグネット',     desc: 'スクラップを吸い寄せる距離 +50%' },
+  { id: 'legs',   fam: 'implant', part: 'legs',  short: '脚', name: '脚部アクチュエータ', desc: '移動速度 +12%' },
+  { id: 'reflex', fam: 'implant', part: 'legs',  short: '反', name: '反射神経ブースト',   desc: 'ダッシュの再使用が 30% 早くなる' },
+  { id: 'rate',   fam: 'mod',     part: 'gun',   short: '連', name: '高速機関部',         desc: '連射 +25%' },
+  { id: 'dmg',    fam: 'mod',     part: 'gun',   short: '威', name: '大口径弾',           desc: '弾の威力 +1' },
+  { id: 'pierce', fam: 'mod',     part: 'gun',   short: '貫', name: '徹甲弾',             desc: '弾が敵を 1 体 貫通する' },
+  { id: 'multi',  fam: 'mod',     part: 'gun',   short: '多', name: '多銃身',             desc: '同時に撃つ弾 +1（扇状に広がる）' },
+  { id: 'range',  fam: 'mod',     part: 'gun',   short: '射', name: '長銃身',             desc: '射程 +25%・弾速 +15%' },
 ];
-const PART = {}; for (const p of PARTS) PART[p.id] = p;
-// 品（売り物・Phase 3a）＝ダンジョンで拾い、印刷所の店で売る。base＝基準価格（Cr）。死ぬと失う（要件定義 #17）。設計図と「刷る」は 3b
+const PARTS = SKILLS, PART = {}; for (const p of SKILLS) PART[p.id] = p;   // PARTS＝パッチの候補（＝スキル表そのもの。名前は Phase 2 からの互換）
+// 義体の部位（要件定義 #21）＝各部位が既にある仕組みのダイヤル
+const SLOTS = [
+  { id: 'head',  name: '頭', ch: '頭', part: '義眼', desc: '照準・射程' },
+  { id: 'body',  name: '胴', ch: '胴', part: '胸郭', desc: 'HP・無敵' },
+  { id: 'arms',  name: '腕', ch: '腕', part: '義腕', desc: '連射・拡散' },
+  { id: 'waist', name: '腰', ch: '腰', part: '腰部', desc: '袋の枠・吸引' },
+  { id: 'legs',  name: '脚', ch: '脚', part: '義足', desc: '速度・ダッシュ' },
+];
+const SLOT = {}; for (const sl of SLOTS) SLOT[sl.id] = sl;
+// 型（装備の設計図＝GEAR）。tier 0＝標準（最初から装備・スキル無し）／1＝街路型（型は最初から工房にある・町の品で焼き込む）／2＝王型（型はボスが落とす＝恒久物・死んでも残る）。cost＝素材（品id→個数）・cr＝金
+const GEAR = [
+  { id: 'head0',  slot: 'head',  tier: 0, name: '標準義眼',   skills: {} },
+  { id: 'head1',  slot: 'head',  tier: 1, name: '街路型 義眼', skills: { aim: 1 },               cost: { lens: 2, chip: 1 },          cr: 30 },
+  { id: 'head2',  slot: 'head',  tier: 2, name: '王型 義眼',   skills: { aim: 2, fore: 1 },      cost: { lens: 3, king: 1 },          cr: 80 },
+  { id: 'body0',  slot: 'body',  tier: 0, name: '標準胸郭',   skills: {} },
+  { id: 'body1',  slot: 'body',  tier: 1, name: '街路型 胸郭', skills: { armor: 1 },             cost: { core: 1, cell: 2 },          cr: 40 },
+  { id: 'body2',  slot: 'body',  tier: 2, name: '王型 胸郭',   skills: { armor: 2, skin: 1 },    cost: { core: 2, king: 1 },          cr: 80 },
+  { id: 'arms0',  slot: 'arms',  tier: 0, name: '標準義腕',   skills: {} },
+  { id: 'arms1',  slot: 'arms',  tier: 1, name: '街路型 義腕', skills: { steady: 1 },            cost: { cell: 3, chip: 1 },          cr: 30 },
+  { id: 'arms2',  slot: 'arms',  tier: 2, name: '王型 義腕',   skills: { steady: 2, quick: 1 },  cost: { cell: 3, lens: 1, king: 1 }, cr: 80 },
+  { id: 'waist0', slot: 'waist', tier: 0, name: '標準腰部',   skills: {} },
+  { id: 'waist1', slot: 'waist', tier: 1, name: '街路型 腰部', skills: { cargo: 1 },             cost: { chip: 3 },                   cr: 20 },
+  { id: 'waist2', slot: 'waist', tier: 2, name: '王型 腰部',   skills: { cargo: 2, magnet: 1 },  cost: { chip: 4, core: 1, king: 1 }, cr: 80 },
+  { id: 'legs0',  slot: 'legs',  tier: 0, name: '標準義足',   skills: {} },
+  { id: 'legs1',  slot: 'legs',  tier: 1, name: '街路型 義足', skills: { legs: 1 },              cost: { cell: 2, chip: 2 },          cr: 30 },
+  { id: 'legs2',  slot: 'legs',  tier: 2, name: '王型 義足',   skills: { legs: 2, reflex: 1 },   cost: { cell: 3, core: 1, king: 1 }, cr: 80 },
+];
+const GEARM = {}; for (const g of GEAR) GEARM[g.id] = g;
+// 素体（要件定義 #24・R17）＝主人公の器。初版は1つ。複数主人公＝行を足す
+const FRAMES = [{ id: 'std', name: '標準素体', hp: 5, spd: 175, slots: ['head', 'body', 'arms', 'waist', 'legs'] }];
+const FRAMEM = {}; for (const f of FRAMES) FRAMEM[f.id] = f;
+function FRAME() { return FRAMEM[S.frame] || FRAMES[0]; }
+// 品（＝売り物であり素材・要件定義 #23）＝ダンジョンで拾い、店で売るか、工房で焼き込む素材にする。base＝基準価格（Cr）。死ぬと失う（#17）。src＝出どころ（R15＝「足りない素材はどこで落ちるか」）。設計図と「刷る」は 3b
 const GOODS = [
-  { id: 'chip', ch: '記', name: '記憶チップ', base: 6,  col: '#9ad0ff' },
-  { id: 'cell', ch: '電', name: '電池セル',   base: 9,  col: '#a8ff9a' },
-  { id: 'lens', ch: '眼', name: '光学レンズ', base: 15, col: '#ffd166' },
-  { id: 'core', ch: '核', name: '義体コア',   base: 30, col: '#ff9ad0' },
+  { id: 'chip', ch: '記', name: '記憶チップ', base: 6,  col: '#9ad0ff', src: '射撃型（町）' },
+  { id: 'cell', ch: '電', name: '電池セル',   base: 9,  col: '#a8ff9a', src: '突進型（町）' },
+  { id: 'lens', ch: '眼', name: '光学レンズ', base: 15, col: '#ffd166', src: '宝物庫・フロア2以降' },
+  { id: 'core', ch: '核', name: '義体コア',   base: 30, col: '#ff9ad0', src: 'ボス・宝物庫・フロア3以降' },
+  { id: 'king', ch: '王', name: '王のコア',   base: 60, col: '#ff6b6b', src: 'ボスのみ' },
 ];
 const GOOD = {}; for (const g of GOODS) GOOD[g.id] = g;
-const GOOD_W = [[50, 35, 13, 2], [35, 35, 22, 8], [20, 35, 30, 15], [8, 22, 38, 32]];   // フロア別の出やすさ（chip/cell/lens/core）。最後＝ボス
 // 銃（恒久装備・Phase 3a）＝工房で買い、出撃時に1丁選ぶ。挙動の違い＝連射間隔／同時弾数／拡散(rad)／1発の威力／射程／弾速／バースト数と間隔。⚠️射程は300以上にする＝射撃型は300で足を止めて撃つため、射程が短い銃は止まって撃つ主人公が手詰まりになる（PC棒立ち実測＝射程230で死亡26/48）。近距離向きの性格は拡散（遠いと散る）で出す
+// 3c-1＝銃は基礎値（この表）＋銃スキルの器。sig＝性格スキル（段1を焼き込むと +1）・cost1/cr1＝段1の素材と金。派生分岐は 3c-2
 const GUNS = [
-  { id: 'hand', name: 'ハンドガン',       price: 0,  rate: 0.14, n: 1, spread: 0.06, dmg: 1,   range: 300, spd: 700, burst: 1, gap: 0,    desc: '基準の1丁。素直な連射と射程' },
-  { id: 'smg',  name: 'サブマシンガン',   price: 40, rate: 0.06, n: 1, spread: 0.14, dmg: 0.6, range: 300, spd: 660, burst: 1, gap: 0,    desc: '超連射・1発は軽い・少しばらける' },
-  { id: 'shot', name: 'ショットガン',     price: 60, rate: 0.50, n: 5, spread: 0.22, dmg: 1,   range: 300, spd: 640, burst: 1, gap: 0,    desc: '5発同時の扇・近いほど当たる（遠いと散る）' },
-  { id: 'ar',   name: 'アサルトライフル', price: 80, rate: 0.40, n: 1, spread: 0.03, dmg: 1,   range: 370, spd: 820, burst: 3, gap: 0.06, desc: '3点バースト・正確・長射程' },
+  { id: 'hand', name: 'ハンドガン',       price: 0,  rate: 0.14, n: 1, spread: 0.06, dmg: 1,   range: 300, spd: 700, burst: 1, gap: 0,    desc: '基準の1丁。素直な連射と射程',           sig: 'dmg',   cost1: { cell: 2, chip: 2 }, cr1: 30 },
+  { id: 'smg',  name: 'サブマシンガン',   price: 40, rate: 0.06, n: 1, spread: 0.14, dmg: 0.6, range: 300, spd: 660, burst: 1, gap: 0,    desc: '超連射・1発は軽い・少しばらける',       sig: 'rate',  cost1: { chip: 3, cell: 1 }, cr1: 40 },
+  { id: 'shot', name: 'ショットガン',     price: 60, rate: 0.50, n: 5, spread: 0.22, dmg: 1,   range: 300, spd: 640, burst: 1, gap: 0,    desc: '5発同時の扇・近いほど当たる（遠いと散る）', sig: 'multi', cost1: { cell: 3, core: 1 }, cr1: 50 },
+  { id: 'ar',   name: 'アサルトライフル', price: 80, rate: 0.40, n: 1, spread: 0.03, dmg: 1,   range: 370, spd: 820, burst: 3, gap: 0.06, desc: '3点バースト・正確・長射程',             sig: 'range', cost1: { lens: 2, chip: 2 }, cr1: 60 },
 ];
 const GUN = {}; for (const g of GUNS) GUN[g.id] = g;
 // 住人（NPC断片・Phase 3a＝1人）。帰還・死亡のたびに1行進む（Hades の写像＝負けたランにも必ず新しい1行）
@@ -143,10 +184,21 @@ function floorRng(seed, fi) { return mulberry32((seed + Math.imul(fi + 1, 0x9E37
 
 // ---------- 保存（設定＋通算／ラン中）----------
 const SAVE_KEY = 'printrun.p1', RUN_KEY = 'printrun.run';
-let S = { sound: true, meter: true, dashInput: 'flick', runs: 0, kills: 0, clears: 0, bestRooms: 0, wins: 0, bestFloor: 0, scrapBank: 0,
-  money: 0, day: 1, bagMax: TUNE.bag.base, warehouse: {}, guns: ['hand'], gun: 'hand', npcIdx: 0, lastRun: null, sold: 0, earned: 0 };   // dashInput: 'tap' | 'flick' | 'both'（既定はフリック）／scrapBank＝倉庫のスクラップ／money＝金(Cr)／warehouse＝倉庫の品（id→個数）／guns＝持っている銃／gun＝出撃に持つ銃／npcIdx＝住人の行の進み
-try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(S, JSON.parse(j)); } catch (e) { }
-if (!Array.isArray(S.guns) || !S.guns.length) S.guns = ['hand']; if (!GUN[S.gun] || !S.guns.includes(S.gun)) S.gun = 'hand'; if (!S.warehouse || typeof S.warehouse !== 'object') S.warehouse = {}; S.bagMax = Math.max(TUNE.bag.base, Math.min(TUNE.bag.max, S.bagMax | 0));   // 旧版（p2）の保存からの移行
+function defaultS() { return { v: 0, sound: true, meter: true, dashInput: 'flick', runs: 0, kills: 0, clears: 0, bestRooms: 0, wins: 0, bestFloor: 0, scrapBank: 0,
+  money: 0, day: 1, bagMax: TUNE.bag.base, bagBonus: 0, warehouse: {}, guns: ['hand'], gun: 'hand', gunLv: {}, gear: null, owned: [], molds: null, frame: 'std', npcIdx: 0, lastRun: null, sold: 0, earned: 0 }; }   // v は 0 で始め migrateS が 3 にする＝旧保存（v 無し）を必ず変換に通す
+let S = defaultS();   // dashInput: 'tap' | 'flick' | 'both'（既定はフリック）／scrapBank＝倉庫のスクラップ／money＝金(Cr)／warehouse＝倉庫の品（id→個数）／guns＝持っている銃／gun＝出撃に持つ銃／gunLv＝銃の段（0/1）／gear＝部位→装備中の型id／owned＝焼き込んだ型／molds＝持っている型（設計図）／frame＝素体／bagBonus＝旧版（p3a）で買った枠の増分／npcIdx＝住人の行の進み
+try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(defaultS(), JSON.parse(j)); } catch (e) { }
+function migrateS() {   // 旧版（p2／p3a＝v2以前）の保存からの移行（R19）。枠の購入分は bagBonus へ、装備は標準、街路型の型は最初から持つ
+  if (!Array.isArray(S.guns) || !S.guns.length) S.guns = ['hand']; if (!GUN[S.gun] || !S.guns.includes(S.gun)) S.gun = 'hand'; if (!S.warehouse || typeof S.warehouse !== 'object') S.warehouse = {};
+  if (!S.gunLv || typeof S.gunLv !== 'object') S.gunLv = {};
+  if (!(S.v >= 3)) { S.bagBonus = Math.max(0, Math.min(TUNE.bag.max - TUNE.bag.base, (S.bagMax | 0) - TUNE.bag.base)); S.v = 3; }   // 旧版で買った枠＝腰の「積載」とは別枠で残す（買った分を失わせない）
+  if (!S.gear || typeof S.gear !== 'object') S.gear = {}; for (const sl of SLOTS) { const g = GEARM[S.gear[sl.id]]; if (!g || g.slot !== sl.id) S.gear[sl.id] = sl.id + '0'; }
+  if (!Array.isArray(S.owned)) S.owned = []; S.owned = S.owned.filter(id => GEARM[id]);
+  if (!Array.isArray(S.molds)) S.molds = []; S.molds = S.molds.filter(id => GEARM[id]); for (const g of GEAR) if (g.tier === 1 && !S.molds.includes(g.id)) S.molds.push(g.id);
+  for (const sl of SLOTS) { const g = GEARM[S.gear[sl.id]]; if (g.tier > 0 && !S.owned.includes(g.id)) S.gear[sl.id] = sl.id + '0'; }   // 持っていない型を装備していたら標準へ
+  if (!FRAMEM[S.frame]) S.frame = 'std'; S.bagBonus = Math.max(0, S.bagBonus | 0);
+}
+migrateS();
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { } }
 function loadRun() { try { const j = localStorage.getItem(RUN_KEY); if (!j) return null; const o = JSON.parse(j); return (o && o.v === 2) ? o : null; } catch (e) { return null; } }
 function clearRun() { try { localStorage.removeItem(RUN_KEY); } catch (e) { } G.saved = null; }
@@ -230,21 +282,36 @@ function relayoutIfChanged() {   // 30フレームごと＝窓の大きさか sa
 const G = { mode: 'title', seed: 0, floorIdx: 0, floor: null, room: null, tiles: null, open: true, flow: new Int16Array(COLS * ROWS), flowT: 0,
   kills: 0, time: 0, banner: null, shake: 0, portal: null, aim: null, overlayT: 0, roomsVisited: 0, deadT: 0,
   parts: {}, scrap: 0, nanoCnt: 0, pickups: [], peds: [], floats: [], choice: null, saved: null, boss: null, runScrapStart: 0,
-  bag: [], bagMax: TUNE.bag.base, gun: GUNS[0], swap: null, shop: null, home: false, data: null, exitAsk: false, goodsGot: 0 };   // Phase 3a: bag＝持ち帰り枠の中身（品idの列）／gun＝今の銃／swap＝入れ替え画面／shop＝店の1日／home＝拠点にいる
+  bag: [], bagMax: TUNE.bag.base, gun: GUNS[0], swap: null, shop: null, home: false, data: null, exitAsk: false, goodsGot: 0,
+  perm: {}, forge: null, roomMix: null };   // Phase 3a: bag＝持ち帰り枠の中身（品idの列）／gun＝今の銃／swap＝入れ替え画面／shop＝店の1日／home＝拠点にいる。3c-1: perm＝恒久のスキルLv（装備＋銃の段から computePerm で作る）／forge＝工房で開いている部位／roomMix＝今の部屋の敵の型の内訳（品の出どころ）
 const player = { x: RW / 2, y: RH / 2, r: 11, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, spd: TUNE.player.spd, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0, burstN: 0, burstT: 0 };
-const D = { spd: 0, fireRate: 0, dmg: 1, pierce: 0, multi: 0, range: 0, bulletSpd: 0, dashCool: 0, inv: 0 };   // 部品を反映した現在値（recompute で作る）
+const D = { spd: 0, fireRate: 0, dmg: 1, pierce: 0, multi: 0, range: 0, bulletSpd: 0, dashCool: 0, inv: 0, spread: 1, tellK: 1, magnet: 70, bag: TUNE.bag.base };   // スキルを反映した現在値（recompute で作る）
 let enemies = [], bullets = [], parts = [];
-function lv(id) { return G.parts[id] || 0; }
-function recompute() {   // 銃（恒久・GUNS）を土台に、パッチ（ラン内・PARTS）を掛ける
-  const g = G.gun || GUNS[0];
-  D.spd = TUNE.player.spd * (1 + 0.12 * lv('legs')); player.spd = D.spd;
-  D.fireRate = g.rate / (1 + 0.25 * lv('rate'));
-  D.dmg = g.dmg + lv('dmg'); D.pierce = lv('pierce'); D.multi = lv('multi');
-  D.range = g.range * (1 + 0.25 * lv('range')); D.bulletSpd = g.spd * (1 + 0.15 * lv('range'));
-  D.dashCool = Math.max(0.12, TUNE.dash.cool * (1 - 0.3 * lv('reflex')));
-  D.inv = TUNE.player.inv * (1 + 0.4 * lv('skin'));
+function permLv(id) { return G.perm[id] || 0; }      // 恒久（装備＋銃の段）
+function patchLv(id) { return G.parts[id] || 0; }    // パッチ（ラン内）
+function lv(id) { return permLv(id) + patchLv(id); } // 合計＝効果に使う値（R10＝1つの表で合算）
+function skillCap() { return TUNE.skills.max + TUNE.skills.overclock; }   // 合計の上限（恒久の上限＋オーバークロック）
+function canPatch(id) { return patchLv(id) < TUNE.parts.maxLv && lv(id) < skillCap(); }   // パッチを足せるか＝パッチ自体の上限と合計の上限の両方
+function computePerm() {   // 恒久のスキルLv＝装備中の型（5部位）＋銃の段1（性格スキル）
+  G.perm = {};
+  for (const sl of SLOTS) { const g = GEARM[S.gear[sl.id]]; if (!g) continue; for (const k in g.skills) G.perm[k] = (G.perm[k] || 0) + g.skills[k]; }
+  const gun = G.gun || GUN[S.gun] || GUNS[0]; if (gun.sig && (S.gunLv[gun.id] | 0) >= 1) G.perm[gun.sig] = (G.perm[gun.sig] || 0) + 1;
+  recompute();
 }
-recompute();
+function bagCap() { return Math.min(TUNE.bag.max, TUNE.bag.base + 2 * lv('cargo') + (S.bagBonus | 0)); }   // 持ち帰り枠＝素体の基本＋積載Lv×2＋旧版の購入分
+function recompute() {   // 素体・銃（恒久）を土台に、スキルの合計Lv（恒久＋パッチ）を掛ける。倍率は Lv5（オーバークロック）でも壊れない形（下限つき）
+  const g = G.gun || GUNS[0], f = FRAME();
+  D.spd = f.spd * (1 + 0.12 * lv('legs')); player.spd = D.spd;
+  D.fireRate = g.rate / ((1 + 0.25 * lv('rate')) * (1 + 0.12 * lv('quick')));
+  D.dmg = g.dmg + lv('dmg'); D.pierce = lv('pierce'); D.multi = lv('multi');
+  D.range = g.range * (1 + 0.25 * lv('range')) * (1 + 0.15 * lv('aim')); D.bulletSpd = g.spd * (1 + 0.15 * lv('range'));
+  D.spread = Math.max(0.1, 1 - 0.25 * lv('steady'));
+  D.dashCool = Math.max(0.12, TUNE.dash.cool * Math.max(0.1, 1 - 0.3 * lv('reflex')));
+  D.inv = TUNE.player.inv * (1 + 0.4 * lv('skin'));
+  D.tellK = 1 + 0.15 * lv('fore'); D.magnet = 70 * (1 + 0.5 * lv('magnet'));
+  D.bag = bagCap(); if (G.bagMax < D.bag) G.bagMax = D.bag;
+}
+computePerm();
 function floorCfg() { return TUNE.floors[G.floorIdx] || TUNE.floors[TUNE.floors.length - 1]; }
 function isBossFloor() { return !!floorCfg().boss; }
 function isCombat(room) { return room.type === 'normal' || room.type === 'exit' || room.type === 'boss'; }
@@ -376,10 +443,10 @@ function resumeRun(sv) {
   G.seed = sv.seed; G.floorIdx = sv.floor; G.floor = genFloor(G.floorIdx);
   for (const k in sv.rooms) { const r = G.floor.rooms.get(k); if (!r) continue; const f = sv.rooms[k]; r.cleared = !!f.c; r.visited = !!f.v; r.rewardTaken = !!f.r; r.spawned = r.cleared; if (r.items && f.s) r.items.forEach((it, i) => { it.sold = !!f.s[i]; }); }
   G.parts = Object.assign({}, sv.parts || {}); G.scrap = sv.scrap || 0; G.kills = sv.kills || 0; G.time = sv.time || 0; G.roomsVisited = sv.rv || 0; G.nanoCnt = sv.nano || 0; G.runScrapStart = G.scrap;
-  G.bag = (sv.bag || []).filter(id => GOOD[id]); G.bagMax = sv.bagMax || S.bagMax; G.gun = GUN[sv.gun] || GUN[S.gun] || GUNS[0]; G.goodsGot = sv.gg || 0; G.home = false; G.swap = null; G.exitAsk = false;
+  G.bag = (sv.bag || []).filter(id => GOOD[id]); G.gun = GUN[sv.gun] || GUN[S.gun] || GUNS[0]; G.goodsGot = sv.gg || 0; G.home = false; G.swap = null; G.exitAsk = false; G.forge = null;
   G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; parts = []; G.floats = []; G.choice = null;
   Object.assign(player, { hp: sv.hp, maxHp: sv.maxHp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0, burstN: 0, burstT: 0 });
-  recompute();
+  computePerm(); G.bagMax = Math.max(sv.bagMax || 0, bagCap()); recompute();
   const room = G.floor.rooms.get(sv.room) || G.floor.start;
   G.mode = 'run'; enterRoom(room, null); SFX.start();
 }
@@ -389,8 +456,9 @@ function newRun() {
   G.seed = ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0); G.floorIdx = 0; G.floor = genFloor(0);
   G.kills = 0; G.time = 0; G.shake = 0; G.portal = null; G.aim = null; G.overlayT = 0; G.roomsVisited = 0; parts = []; G.floats = []; G.choice = null;
   G.parts = {}; G.scrap = 0; G.nanoCnt = 0; G.runScrapStart = 0;
-  G.bag = []; G.bagMax = S.bagMax; G.gun = GUN[S.gun] || GUNS[0]; G.goodsGot = 0; G.home = false; G.swap = null; G.exitAsk = false;
-  Object.assign(player, { x: RW / 2, y: RH / 2, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0, burstN: 0, burstT: 0 });
+  G.bag = []; G.gun = GUN[S.gun] || GUNS[0]; G.goodsGot = 0; G.home = false; G.swap = null; G.exitAsk = false; G.forge = null;
+  computePerm(); G.bagMax = bagCap(); const hp0 = FRAME().hp + permLv('armor');   // 最大HP＝素体＋装甲皮膚（恒久）
+  Object.assign(player, { x: RW / 2, y: RH / 2, hp: hp0, maxHp: hp0, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0, burstN: 0, burstT: 0 });
   recompute(); G.mode = 'run'; enterRoom(G.floor.start, null); SFX.start();
 }
 // 印刷所へ帰る（kind: 'exit'＝出口で帰る／'win'＝ボス撃破／'dead'＝刷り直し）。品は生きて帰った時だけ倉庫へ、スクラップ・型（銃・枠）は必ず残る（要件定義 #17）
@@ -433,15 +501,22 @@ function enterRoom(room, fromDir) {
   banner(roomLabel(room), 1.0);
   saveRun();
 }
-function placePortal() { const p = freeNear(RW / 2, RH / 2); G.portal = { x: p.x, y: p.y, t: 0, end: G.room.type === 'boss' }; }
+function placePortal() {   // 出口＝部屋の中央寄りで、主人公から 90px 以上離れた床タイル（真下に出て品を拾う前にフロアが終わるのを防ぐ＝p3c1-0.1.0）。近くに出た時は一度離れるまで反応しない
+  let best = null, bd = 1e9;
+  for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) { if (G.tiles[c + r * COLS] !== 0) continue; const x = c * TILE + TILE / 2, y = r * TILE + TILE / 2; if (Math.hypot(x - player.x, y - player.y) < 90) continue; const d = Math.hypot(x - RW / 2, y - RH / 2); if (d < bd) { bd = d; best = { x, y }; } }
+  const p = best || freeNear(RW / 2, RH / 2);
+  G.portal = { x: p.x, y: p.y, t: 0, end: G.room.type === 'boss', hold: Math.hypot(p.x - player.x, p.y - player.y) < 44 };
+}
 function spawnEnemies(room) {
   const cfg = floorCfg().room, hpAdd = floorCfg().hp || 0, order = G.roomsVisited;
   const n = Math.min(cfg.max, cfg.base + Math.floor(Math.random() * cfg.rand) + (order >= TUNE.room.bonusFrom ? 1 : 0));
   const cells = [];
   for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) { if (G.tiles[c + r * COLS] !== 0) continue; const x = c * TILE + TILE / 2, y = r * TILE + TILE / 2; if (Math.hypot(x - player.x, y - player.y) < TUNE.room.spawnDist) continue; cells.push([x, y]); }
   for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = cells[i]; cells[i] = cells[j]; cells[j] = t; }
+  G.roomMix = { rusher: 0, shooter: 0 };   // 品の出どころ（R15）＝この部屋にいた敵の型
   for (let i = 0; i < n && i < cells.length; i++) {
     const type = (i === 0) ? 'rusher' : (i === 1) ? 'shooter' : (Math.random() < 0.6 ? 'rusher' : 'shooter');
+    G.roomMix[type]++;
     const [x, y] = cells[i];
     enemies.push(type === 'rusher'
       ? { type, x, y, r: 13, hp: TUNE.rusher.hp + hpAdd, maxHp: TUNE.rusher.hp + hpAdd, st: 'spawn', t: 0.8 + i * 0.12, dx: 0, dy: 0, flash: 0, face: 0, sx: x, sy: y, stuckT: 0, nudgeT: 0, nudge: 0 }
@@ -474,15 +549,30 @@ function healPlayer(n) { const before = player.hp; player.hp = Math.min(player.m
 function spawnReward(room, p) { G.pickups.push({ kind: 'reward', rk: room.reward, x: p.x, y: p.y, t: 0 }); }
 function dropScrap(x, y, n) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.2832, v = 40 + Math.random() * 60; G.pickups.push({ kind: 'scrap', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0 }); } }
 function addScrap(n) { G.scrap += n; }
-function rollGood(tier) { const w = GOOD_W[Math.min(tier, GOOD_W.length - 1)]; let t = w.reduce((a, b) => a + b, 0), x = Math.random() * t; for (let i = 0; i < GOODS.length; i++) { x -= w[i]; if (x < 0) return GOODS[i].id; } return GOODS[0].id; }
-function spawnGoods(x, y, n, tier) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.2832, v = 60 + Math.random() * 60; G.pickups.push({ kind: 'good', id: rollGood(tier), x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0 }); } }
-function spawnGoodsAround(x, y, n, tier) {   // 品を (x,y) のタイルの隣の床タイルへ1個ずつ置く（報酬の印・台座の真上に落とさない＝p3a-0.1.1）。隣が足りない分は従来どおり散らす
+// 品の出どころ（R15）＝戦闘部屋はその部屋にいた敵の型（突進型→電池セル／射撃型→記憶チップ）。深いフロアほど光学レンズ・義体コアが混ざる。宝物庫＝レンズ中心。ボス＝王のコア1個は必ず
+function roomGoods(n) {
+  const mix = G.roomMix || { rusher: 1, shooter: 1 }, tot = (mix.rusher | 0) + (mix.shooter | 0), out = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.random(), pl = G.floorIdx >= 1 ? TUNE.goods.deepLens * G.floorIdx : 0, pc = G.floorIdx >= 2 ? TUNE.goods.deepCore : 0;
+    if (r < pl) out.push('lens'); else if (r < pl + pc) out.push('core');
+    else out.push(tot > 0 && Math.random() * tot < (mix.rusher | 0) ? 'cell' : 'chip');
+  }
+  return out;
+}
+function treasureGoods(n) { const out = []; for (let i = 0; i < n; i++) { const r = Math.random(); out.push(r < 0.6 ? 'lens' : r < 0.9 ? 'core' : 'chip'); } return out; }
+function bossGoods(n) { const out = ['king']; for (let i = 1; i < n; i++) out.push(Math.random() < 0.6 ? 'core' : 'lens'); return out; }
+function spawnGoods(x, y, ids) { for (const id of ids) { const a = Math.random() * 6.2832, v = 60 + Math.random() * 60; G.pickups.push({ kind: 'good', id, x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0 }); } }
+function spawnGoodsAround(x, y, ids) {   // 品を (x,y) のタイルの隣の床タイルへ1個ずつ置く（報酬の印・台座の真上に落とさない＝p3a-0.1.1）。隣が足りない分は従来どおり散らす
   const c0 = Math.floor(x / TILE), r0 = Math.floor(y / TILE); const cand = [];
   for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { if (!dr && !dc) continue; const c = c0 + dc, r = r0 + dr; if (c < 1 || r < 1 || c >= COLS - 1 || r >= ROWS - 1 || G.tiles[c + r * COLS] !== 0) continue; cand.push({ x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 }); }
   for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cand[i], cand[j]] = [cand[j], cand[i]]; }
   let k = 0;
-  for (; k < n && k < cand.length; k++) G.pickups.push({ kind: 'good', id: rollGood(tier), x: cand[k].x + (Math.random() - 0.5) * 6, y: cand[k].y + (Math.random() - 0.5) * 6, vx: 0, vy: 0, t: 0 });
-  if (k < n) spawnGoods(x, y, n - k, tier);
+  for (; k < ids.length && k < cand.length; k++) G.pickups.push({ kind: 'good', id: ids[k], x: cand[k].x + (Math.random() - 0.5) * 6, y: cand[k].y + (Math.random() - 0.5) * 6, vx: 0, vy: 0, t: 0 });
+  if (k < ids.length) spawnGoods(x, y, ids.slice(k));
+}
+function awardMold() {   // ボス撃破＝王型の型を1つ（未所持からランダム）。恒久物＝その場で保存（死んでも残る・要件定義 #17）
+  const cand = GEAR.filter(g => g.tier === 2 && !S.molds.includes(g.id)); if (!cand.length) return null;
+  const g = cand[Math.floor(Math.random() * cand.length)]; S.molds.push(g.id); save(); return g;
 }
 function holdPickups() {   // 画面（入れ替え・3択）を閉じた直後、足元にある品・報酬の印は「一度離れてから」でないと拾わない（画面が続けて出るのを防ぐ）
   for (const p of G.pickups) { if (p.kind !== 'good' && p.kind !== 'reward') continue; if (Math.hypot(player.x - p.x, player.y - p.y) < player.r + 22) p.hold = true; }
@@ -498,19 +588,20 @@ function swapPick(i) {   // i＝捨てる袋の位置（-1＝拾わない）。�
   if (i >= 0 && i < G.bag.length) { const old = G.bag[i]; G.bag[i] = sw.id; G.goodsGot++; SFX.pick(); floatText(player.x, player.y - 22, GOOD[old].name + ' を捨てて ' + GOOD[sw.id].name, GOOD[sw.id].col); saveRun(); }
   else { G.pickups.push({ kind: 'good', id: sw.id, x: sw.x, y: sw.y, vx: 0, vy: 0, t: -1.2, hold: true }); }   // 拾わない＝その場に残す（一度離れてから拾う＝p3a-0.1.1）
 }
-function rollParts(fam, n) {   // fam: 'implant' | 'mod' | 'any'。上限レベルの部品は出さない（全部上限なら重複可）
-  let pool = PARTS.filter(p => (fam === 'any' || p.fam === fam) && lv(p.id) < TUNE.parts.maxLv);
+function rollParts(fam, n) {   // fam: 'implant' | 'mod' | 'any'。上限（パッチの上限・合計の上限）のスキルは出さない（全部上限なら重複可）
+  let pool = PARTS.filter(p => (fam === 'any' || p.fam === fam) && canPatch(p.id));
   if (pool.length < n) pool = PARTS.filter(p => fam === 'any' || p.fam === fam);
   const out = []; const arr = pool.slice();
   while (out.length < n && arr.length) { const i = Math.floor(Math.random() * arr.length); out.push(arr.splice(i, 1)[0]); }
   return out;
 }
 function openChooser(fam, from) { G.choice = { fam, from, opts: rollParts(fam, 3) }; G.mode = 'choose'; stick.on = false; }
-function applyPart(p) {
-  if (lv(p.id) >= TUNE.parts.maxLv) { floatText(player.x, player.y - 22, p.name + ' は Lv MAX', COL.mut); return; }
-  G.parts[p.id] = lv(p.id) + 1;
+function applyPart(p) {   // パッチ＝ラン中だけ +Lv（恒久の上限を超えられる＝オーバークロック・要件定義 #22）
+  if (!canPatch(p.id)) { floatText(player.x, player.y - 22, p.name + ' は Lv MAX', COL.mut); return; }
+  G.parts[p.id] = patchLv(p.id) + 1;
   if (p.id === 'armor') { player.maxHp++; player.hp++; }
-  recompute(); SFX.pick(); floatText(player.x, player.y - 22, p.name + ' Lv' + lv(p.id), RK[p.fam].c); burst(player.x, player.y, RK[p.fam].c, 14, 120, 0.6, 3);
+  recompute(); if (p.id === 'cargo') G.bagMax = Math.max(G.bagMax, bagCap());
+  const oc = lv(p.id) > TUNE.skills.max; SFX.pick(); floatText(player.x, player.y - 22, p.name + ' Lv' + lv(p.id) + (oc ? '（OC）' : ''), RK[p.fam].c); burst(player.x, player.y, RK[p.fam].c, 14, 120, 0.6, 3);
 }
 function takeReward(pk) {
   const room = G.room; room.rewardTaken = true;
@@ -526,9 +617,9 @@ function pickChoice(p) {
   saveRun();
 }
 function touchPed(ped) {
-  if (ped.kind === 'treasure') { openChooser('any', 'treasure'); spawnGoodsAround(ped.x, ped.y, TUNE.goods.treasure, G.floorIdx); return; }
+  if (ped.kind === 'treasure') { openChooser('any', 'treasure'); spawnGoodsAround(ped.x, ped.y, treasureGoods(TUNE.goods.treasure)); return; }
   const it = ped.item; if (it.sold) return;
-  if (it.kind === 'part' && lv(it.id) >= TUNE.parts.maxLv) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'Lv MAX（これ以上は付かない）', COL.mut); } return; }
+  if (it.kind === 'part' && !canPatch(it.id)) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'Lv MAX（これ以上は付かない）', COL.mut); } return; }
   if (G.scrap < it.price) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'スクラップ不足（◆' + it.price + '）', COL.mut); } return; }
   addScrap(-it.price); it.sold = true; G.peds = G.peds.filter(q => q !== ped); SFX.buy();
   if (it.kind === 'heal') healPlayer(TUNE.loot.heal); else applyPart(PART[it.id]);
@@ -556,7 +647,7 @@ function press(p) {
     if (inBtn(BTN.pause, p)) { goTitle(); return true; }
     return false;
   }
-  if (['title', 'pause', 'choose', 'swap', 'launch', 'store', 'forge', 'talk', 'shop', 'data'].includes(G.mode)) { hitUI(p); return true; }
+  if (['title', 'pause', 'choose', 'swap', 'launch', 'store', 'forge', 'forgeSlot', 'talk', 'shop', 'data'].includes(G.mode)) { hitUI(p); return true; }
   if (G.mode === 'floorclear') { if (G.overlayT > 0.7) hitUI(p); return true; }
   if (G.mode === 'dead' || G.mode === 'win') { if (G.overlayT > 0.7) returnHome(G.mode === 'win' ? 'win' : 'dead'); return true; }
   return true;
@@ -627,8 +718,8 @@ function readInput() {
 // ---------- 更新 ----------
 function fireBullet(a) { bullets.push({ x: player.x + Math.cos(a) * 14, y: player.y + Math.sin(a) * 14, vx: Math.cos(a) * D.bulletSpd, vy: Math.sin(a) * D.bulletSpd, r: 3, from: 'p', life: 1.2, dmg: D.dmg, pierce: D.pierce, last: null }); }
 function fireVolley() {   // 1トリガー分＝銃の同時弾数（＋多銃身）を拡散の扇に並べる。単発は拡散ぶんだけ散る
-  const g = G.gun, n = g.n + D.multi, fan = n > 1 ? Math.max(g.spread, 0.14 * (n - 1)) : 0;
-  for (let i = 0; i < n; i++) { const a = player.ang + (n > 1 ? (i - (n - 1) / 2) * fan / (n - 1) : 0) + (Math.random() - 0.5) * (n > 1 ? 0.04 : g.spread); fireBullet(a); }
+  const g = G.gun, n = g.n + D.multi, sp = g.spread * D.spread, fan = n > 1 ? Math.max(sp, 0.14 * (n - 1) * D.spread) : 0;   // 安定化アーム＝拡散（扇の幅・ばらつき）を縮める
+  for (let i = 0; i < n; i++) { const a = player.ang + (n > 1 ? (i - (n - 1) / 2) * fan / (n - 1) : 0) + (Math.random() - 0.5) * (n > 1 ? 0.04 * D.spread : sp); fireBullet(a); }
   SFX.shot(); const a0 = player.ang; parts.push({ x: player.x + Math.cos(a0) * 16, y: player.y + Math.sin(a0) * 16, vx: 0, vy: 0, life: 0.05, max: 0.05, col: COL.white, size: n > 1 ? 8 : 5 });
 }
 function update(dt) {
@@ -683,7 +774,7 @@ function update(dt) {
   for (let i = G.pickups.length - 1; i >= 0; i--) {
     const p = G.pickups[i]; p.t += dt;
     if (p.kind === 'scrap') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; if (solidAt(p.x, p.y)) { p.vx = -p.vx; p.vy = -p.vy; p.x += p.vx * dt * 2; p.y += p.vy * dt * 2; }
-      const dx = player.x - p.x, dy = player.y - p.y, d = Math.hypot(dx, dy); if (d < 70 && p.t > 0.25) { p.x += dx / d * 260 * dt; p.y += dy / d * 260 * dt; }
+      const dx = player.x - p.x, dy = player.y - p.y, d = Math.hypot(dx, dy); if (d < D.magnet && p.t > 0.25) { p.x += dx / d * 260 * dt; p.y += dy / d * 260 * dt; }   // 回収マグネット＝吸い寄せる距離
       if (d < player.r + 8) { G.pickups.splice(i, 1); addScrap(1); SFX.scrap(); } }
     else if (p.kind === 'good') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; if (solidAt(p.x, p.y)) { p.vx = -p.vx; p.vy = -p.vy; p.x += p.vx * dt * 2; p.y += p.vy * dt * 2; }
       const d = Math.hypot(player.x - p.x, player.y - p.y); if (p.hold) { if (d > player.r + 24) p.hold = false; continue; }
@@ -694,7 +785,7 @@ function update(dt) {
   for (const ped of G.peds) { ped.t += dt; ped.msgT -= dt; const d = Math.hypot(player.x - ped.x, player.y - ped.y); if (d < player.r + 17) { touchPed(ped); if (G.mode !== 'run') return; } }
   // 部屋クリア・出口
   if (!G.room.cleared && G.room.spawned && enemies.length === 0) clearRoom();
-  if (G.portal) { G.portal.t += dt; if (Math.hypot(player.x - G.portal.x, player.y - G.portal.y) < 22) { if (G.portal.end) winRun(); else floorClear(); return; } }
+  if (G.portal) { G.portal.t += dt; const dp = Math.hypot(player.x - G.portal.x, player.y - G.portal.y); if (G.portal.hold) { if (dp > 44) G.portal.hold = false; } else if (dp < 22) { if (G.portal.end) winRun(); else floorClear(); return; } }
   if (G.mode !== 'run') return;
   updateFx(dt);
 }
@@ -711,8 +802,8 @@ function homeTiles() { const t = new Uint8Array(COLS * ROWS); for (let r = 0; r 
 function enterHome() {
   G.mode = 'home'; G.home = true; G.floor = null; G.room = HOME_ROOM; G.tiles = homeTiles(); G.open = true; enemies = []; bullets = []; G.portal = null; G.aim = null; G.pickups = []; G.floats = []; G.boss = null; G.choice = null; G.swap = null; G.shop = null; parts = [];
   G.peds = HOME_PEDS.map(h => ({ kind: h.kind, home: h, x: h.x, y: h.y, t: 0, msgT: 0, armed: false }));
-  Object.assign(player, { x: RW / 2, y: TILE * 15.5, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, burstN: 0 });
-  G.parts = {}; G.gun = GUN[S.gun] || GUNS[0]; recompute(); renderStatic(); stick.on = false; G.saved = loadRun();
+  Object.assign(player, { x: RW / 2, y: TILE * 15.5, hp: FRAME().hp, maxHp: FRAME().hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, moving: false, flash: 0, dashT: 0, dashCool: 0, burstN: 0 });
+  G.parts = {}; G.gun = GUN[S.gun] || GUNS[0]; G.forge = null; computePerm(); G.bagMax = bagCap(); renderStatic(); stick.on = false; G.saved = loadRun();
 }
 function updateHome(dt) {
   G.time += dt; readInput(); if (G.banner) { G.banner.t -= dt; if (G.banner.t <= 0) G.banner = null; }
@@ -731,9 +822,37 @@ function openHome(kind) {
 }
 function closeHome() { G.mode = 'home'; stick.on = false; }
 function wareCount() { let n = 0; for (const id in S.warehouse) n += S.warehouse[id] | 0; return n; }
-function buyGun(id) { const g = GUN[id]; if (!g || S.guns.includes(id)) return false; if (S.money < g.price) { SFX.deny(); return false; } S.money -= g.price; S.guns.push(id); S.gun = id; save(); SFX.buy(); return true; }
-function equipGun(id) { if (!S.guns.includes(id)) return false; S.gun = id; save(); return true; }
-function buyBag() { if (S.bagMax >= TUNE.bag.max) return false; if (S.money < TUNE.bag.price) { SFX.deny(); return false; } S.money -= TUNE.bag.price; S.bagMax = Math.min(TUNE.bag.max, S.bagMax + TUNE.bag.step); save(); SFX.buy(); return true; }
+function buyGun(id) { const g = GUN[id]; if (!g || S.guns.includes(id)) return false; if (S.money < g.price) { SFX.deny(); return false; } S.money -= g.price; S.guns.push(id); S.gun = id; save(); SFX.buy(); if (G.home) { G.gun = g; computePerm(); } return true; }
+function equipGun(id) { if (!S.guns.includes(id)) return false; S.gun = id; save(); if (G.home) { G.gun = GUN[id]; computePerm(); } return true; }
+// ---------- 工房＝焼き込む（3c-1・R14）。素材＝倉庫の品、金＝Cr。型（GEAR）は tier1＝最初から／tier2＝ボスが落とす ----------
+function haveOf(id) { return S.warehouse[id] | 0; }
+function missingFor(cost, pool) { const m = {}; for (const k in cost) { const need = cost[k] - ((pool ? pool[k] : haveOf(k)) | 0); if (need > 0) m[k] = need; } return m; }
+function costText(cost, cr) { return Object.keys(cost).map(k => GOOD[k].ch + '×' + cost[k]).join(' ') + '　Cr ' + cr; }
+function forgeMsg(t) { if (G.forge) G.forge.msg = t; }
+function craftGear(id) {   // 型を焼き込む＝素材と金を消費して持ち物に加え、その部位に装備する
+  const g = GEARM[id]; if (!g || g.tier === 0 || S.owned.includes(id)) return false;
+  if (!S.molds.includes(id)) { forgeMsg('型がない（王型の型はボスが落とす）'); SFX.deny(); return false; }
+  const miss = missingFor(g.cost); const mk = Object.keys(miss);
+  if (mk.length) { forgeMsg('素材が足りない＝' + mk.map(k => GOOD[k].name + '×' + miss[k] + '（' + GOOD[k].src + '）').join('・')); SFX.deny(); return false; }
+  if (S.money < g.cr) { forgeMsg('Cr が足りない（' + g.cr + ' 必要）'); SFX.deny(); return false; }
+  for (const k in g.cost) S.warehouse[k] = haveOf(k) - g.cost[k]; S.money -= g.cr; S.owned.push(id); S.gear[g.slot] = id; save(); computePerm(); G.bagMax = bagCap(); SFX.buy(); forgeMsg(g.name + ' を焼き込んで装備した'); return true;
+}
+function equipGear(id) { const g = GEARM[id]; if (!g || (g.tier > 0 && !S.owned.includes(id))) return false; S.gear[g.slot] = id; save(); computePerm(); G.bagMax = bagCap(); SFX.pick(); forgeMsg(g.name + ' を装備した'); return true; }
+function forgeGun(id) {   // 銃の段1＝性格スキル +1（3c-1 は段1だけ。派生分岐は 3c-2）
+  const g = GUN[id]; if (!g || !S.guns.includes(id) || (S.gunLv[id] | 0) >= 1) return false;
+  const miss = missingFor(g.cost1); const mk = Object.keys(miss);
+  if (mk.length) { forgeMsg('素材が足りない＝' + mk.map(k => GOOD[k].name + '×' + miss[k] + '（' + GOOD[k].src + '）').join('・')); SFX.deny(); return false; }
+  if (S.money < g.cr1) { forgeMsg('Cr が足りない（' + g.cr1 + ' 必要）'); SFX.deny(); return false; }
+  for (const k in g.cost1) S.warehouse[k] = haveOf(k) - g.cost1[k]; S.money -= g.cr1; S.gunLv[id] = 1; save(); computePerm(); SFX.buy(); forgeMsg(g.name + ' に段1を焼き込んだ＝' + PART[g.sig].name + ' +1'); return true;
+}
+function permList() { return SKILLS.filter(k => permLv(k.id) > 0).map(k => ({ k, n: permLv(k.id) })); }   // 恒久スキルの一覧（工房のスキル合計・1列）
+function exitInfo() {   // 出口の「進む／帰る」に添える材料（R16）＝袋＋倉庫で作れる型／あと少しの型
+  const pool = {}; for (const k in S.warehouse) pool[k] = S.warehouse[k] | 0; for (const id of G.bag) pool[id] = (pool[id] | 0) + 1;
+  const can = [], near = [];
+  for (const id of S.molds) { const g = GEARM[id]; if (!g || S.owned.includes(id)) continue; const miss = missingFor(g.cost, pool); const n = Object.values(miss).reduce((a, b) => a + b, 0); if (!n && S.money >= g.cr) can.push(g); else if (n > 0 && n <= 2) near.push({ g, miss, n }); }
+  near.sort((a, b) => a.n - b.n);
+  return { can, near };
+}
 
 // ---------- 店の1日（Phase 3a）＝棚に並べ→値付け3段階→開店→客が来て反応→売る→閉店 ----------
 function openShop() {
@@ -779,11 +898,11 @@ function updateShop(dt) {
 }
 
 // ---------- データの書き出し／読み込み（Phase 3a・R6）＝ブラウザ保存が消えても戻せるように ----------
-function exportData() { const o = { v: 1, at: Date.now(), S, run: loadRun() }; return 'PRINTRUN1:' + btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }
+function exportData() { const o = { v: 3, at: Date.now(), S, run: loadRun() }; return 'PRINTRUN1:' + btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }   // 接頭辞は互換のため PRINTRUN1 のまま・中身は v3（旧文字列も読める＝migrateS）
 function importData(text) {
   try { const t = String(text || '').trim(); if (!t.startsWith('PRINTRUN1:')) return '形式が違います（PRINTRUN1: で始まる文字列）';
     const o = JSON.parse(decodeURIComponent(escape(atob(t.slice(10))))); if (!o || !o.S) return '中身が読めません';
-    Object.assign(S, o.S); if (!Array.isArray(S.guns) || !S.guns.length) S.guns = ['hand']; if (!GUN[S.gun]) S.gun = 'hand'; if (!S.warehouse) S.warehouse = {}; save();
+    S = Object.assign(defaultS(), o.S); migrateS(); save(); computePerm();   // 既定に戻してから上書き＝旧い書き出しに無い項目（型・装備）が今の値のまま残らない
     try { if (o.run) localStorage.setItem(RUN_KEY, JSON.stringify(o.run)); else localStorage.removeItem(RUN_KEY); } catch (e) { }
     G.saved = loadRun(); return '読み込みました（DAY ' + S.day + '・Cr ' + S.money + '・品 ' + wareCount() + '）';
   } catch (e) { return '読み込めません: ' + e.message; }
@@ -803,14 +922,14 @@ function dataImport() {
 
 function killEnemy(k) {
   const e = enemies[k]; enemies.splice(k, 1); G.kills++;
-  if (e.type === 'boss') { G.boss = null; burst(e.x, e.y, COL.boss, 60, 240, 1.2, 4); burst(e.x, e.y, COL.white, 30, 160, 0.9, 3); SFX.bossDead(); G.shake = 12; dropScrap(e.x, e.y, TUNE.loot.bossScrap); spawnGoods(e.x, e.y, TUNE.goods.boss, GOOD_W.length - 1); banner('TARGET DOWN', 1.6); return; }
+  if (e.type === 'boss') { G.boss = null; burst(e.x, e.y, COL.boss, 60, 240, 1.2, 4); burst(e.x, e.y, COL.white, 30, 160, 0.9, 3); SFX.bossDead(); G.shake = 12; dropScrap(e.x, e.y, TUNE.loot.bossScrap); spawnGoods(e.x, e.y, bossGoods(TUNE.goods.boss)); const m = awardMold(); if (m) { floatText(e.x, e.y - 30, '型を手に入れた＝' + m.name + '（残る）', COL.portal); banner('型：' + m.name, 2.0); } else banner('TARGET DOWN', 1.6); return; }
   burst(e.x, e.y, e.type === 'rusher' ? COL.rusher : COL.shooter, 16, 160, 0.6, 3); SFX.kill();
   if (Math.random() < TUNE.loot.scrapDrop) dropScrap(e.x, e.y, 1);
   // 部屋の最後の1体＝報酬がその場に出る（Hades の「部屋クリアで報酬」）
   if (enemies.length === 0 && !G.room.cleared && (G.room.type === 'normal' || G.room.type === 'exit')) {
     const p = freeNear(e.x, e.y);
     if (G.room.reward && !G.room.rewardTaken) spawnReward(G.room, p);
-    const [a, b] = TUNE.goods.perRoom; spawnGoodsAround(p.x, p.y, a + Math.floor(Math.random() * (b - a + 1)), G.floorIdx);   // 品＝部屋の最後の1体が落とす（Phase 3a）。報酬の印の隣のタイルへ置く（重ねない＝p3a-0.1.1）
+    const [a, b] = TUNE.goods.perRoom; spawnGoodsAround(p.x, p.y, roomGoods(a + Math.floor(Math.random() * (b - a + 1))));   // 品＝部屋の最後の1体が落とす（出どころ＝部屋の敵の型・R15）。報酬の印の隣のタイルへ置く（重ねない＝p3a-0.1.1）
   }
 }
 function angDiff(a, b) { return Math.abs((((a - b) % 6.2832) + 9.4248) % 6.2832 - 3.1416); }   // 2つの角度の差（0〜π）
@@ -824,7 +943,7 @@ function updateEnemy(e, dt) {
   if (e.type === 'rusher') {
     switch (e.st) {
       case 'spawn': e.t -= dt; if (e.t <= 0) { e.st = 'chase'; } break;
-      case 'chase': if (d < TUNE.rusher.tellDist && see()) { e.st = 'tell'; e.t = TUNE.rusher.tellT; SFX.tell(); } else walkTo(e, dt, TUNE.rusher.spd, true, dx, dy, d); break;
+      case 'chase': if (d < TUNE.rusher.tellDist && see()) { e.st = 'tell'; e.t = TUNE.rusher.tellT * D.tellK; SFX.tell(); } else walkTo(e, dt, TUNE.rusher.spd, true, dx, dy, d); break;   // 予兆×先読み回路
       case 'tell': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t <= 0) { e.dx = dx / d; e.dy = dy / d; e.st = 'dash'; e.t = TUNE.rusher.dashT; SFX.dash(); } break;
       case 'dash': e.t -= dt; { const hit = moveCircle(e, e.dx * TUNE.rusher.dashSpd * dt, e.dy * TUNE.rusher.dashSpd * dt); if (hit) { e.t = Math.min(e.t, 0.05); } } if (e.t <= 0) { e.st = 'rest'; e.t = TUNE.rusher.restT; } break;
       case 'rest': e.t -= dt; if (e.t <= 0) e.st = 'chase'; break;
@@ -835,7 +954,7 @@ function updateEnemy(e, dt) {
       case 'move': if (see()) {
           // 近すぎれば下がる。ただし下がり続けて「視線の境目で行ったり来たり」になると主人公が撃てず詰むため、近距離が続いたら至近で撃つ（p2-0.1.0＝棒立ち実測で発見）
           if (d < TUNE.shooter.near && (e.nearT = (e.nearT || 0) + dt) < TUNE.shooter.nearMax) { moveCircle(e, -dx / d * TUNE.shooter.spd * dt, -dy / d * TUNE.shooter.spd * dt); e.face = Math.atan2(dy, dx); }
-          else if (d < TUNE.shooter.far) { e.st = 'aim'; e.t = TUNE.shooter.aimT; e.ax = player.x; e.ay = player.y; e.nearT = 0; SFX.tell(); } else { e.nearT = 0; walkTo(e, dt, TUNE.shooter.spd, true, dx, dy, d); } }
+          else if (d < TUNE.shooter.far) { e.st = 'aim'; e.t = TUNE.shooter.aimT * D.tellK; e.ax = player.x; e.ay = player.y; e.nearT = 0; SFX.tell(); } else { e.nearT = 0; walkTo(e, dt, TUNE.shooter.spd, true, dx, dy, d); } }
         else walkTo(e, dt, TUNE.shooter.spd, false, dx, dy, d); break;
       case 'aim': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t > TUNE.shooter.lockT) { e.ax = player.x; e.ay = player.y; }
         if (e.t <= 0) { const a = Math.atan2(e.ay - e.y, e.ax - e.x); enemyShot(e.x, e.y, a, TUNE.shooter.bulletSpd, 5); SFX.eshot(); e.st = 'cool'; e.t = TUNE.shooter.coolT; } break;
@@ -855,7 +974,7 @@ function updateBoss(e, dt, dx, dy, d) {
         const order = ['ring', 'charge', 'volley']; e.pat = order[e.seq % 3]; e.seq++; if (e.enraged && Math.random() < 0.3) e.pat = 'charge';
         if (!B.ringWithMinions && e.pat === 'ring' && enemies.some(m => m !== e)) e.pat = 'volley';   // 手下が生きている間は放射弾を撃たない（p2-0.2.0）＝三連射に置き換える（突進に置き換えると手下の突進と重なって突進だらけになる＝PC実測 77%）
         if (e.pat === 'ring') { const pa = Math.atan2(dy, dx), off = (B.ringLaneMinOff + Math.random() * (B.ringLaneMaxOff - B.ringLaneMinOff)) * Math.PI / 180; e.lane = pa + (Math.random() < 0.5 ? off : -off); }   // 安全な扇の向き＝主人公の今の方向から ringLaneMinOff 度以上ずらす＝「扇へ動く」だけで避けられる
-        e.st = 'tell'; e.t = B.tell * (e.pat === 'volley' ? 0.8 : e.pat === 'ring' ? B.ringTellK : 1); e.tellT = e.t; SFX.bossTell();
+        e.st = 'tell'; e.t = B.tell * (e.pat === 'volley' ? 0.8 : e.pat === 'ring' ? B.ringTellK : 1) * D.tellK; e.tellT = e.t; SFX.bossTell();
       } break;
     case 'tell': e.t -= dt; e.face = Math.atan2(dy, dx);
       if (e.t <= 0) {
@@ -923,7 +1042,7 @@ function drawEnemy(e) {
   if (e.type === 'boss') { drawBoss(e); return; }
   const col = e.type === 'rusher' ? COL.rusher : COL.shooter;
   if (e.st === 'spawn') { const k = 1 - Math.max(0, e.t) / 0.9; ctx.strokeStyle = col; ctx.globalAlpha = 0.3 + 0.6 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + (1 - k) * 22, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; return; }
-  if (e.type === 'shooter' && e.st === 'aim') { const k = 1 - e.t / TUNE.shooter.aimT; ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.25 + 0.6 * k; ctx.lineWidth = e.t <= TUNE.shooter.lockT ? 2.5 : 1; if (e.t > TUNE.shooter.lockT) ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.ax, e.ay); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+  if (e.type === 'shooter' && e.st === 'aim') { const k = Math.max(0, 1 - e.t / (TUNE.shooter.aimT * D.tellK)); ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.25 + 0.6 * k; ctx.lineWidth = e.t <= TUNE.shooter.lockT ? 2.5 : 1; if (e.t > TUNE.shooter.lockT) ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.ax, e.ay); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
   if (e.type === 'rusher' && e.st === 'dash') { ctx.globalAlpha = 0.25; ctx.fillStyle = col; tri(e.x - e.dx * 14, e.y - e.dy * 14, e.r, e.face); ctx.fill(); ctx.globalAlpha = 0.12; tri(e.x - e.dx * 28, e.y - e.dy * 28, e.r, e.face); ctx.fill(); ctx.globalAlpha = 1; }
   const flash = e.flash > 0 || (e.st === 'tell' && Math.floor(e.t * 16) % 2 === 0);
   ctx.fillStyle = flash ? COL.white : col;
@@ -985,7 +1104,7 @@ function drawPickups() {
     if (ped.kind === 'treasure') { sign(ped.x, ped.y, 'treasure', false); ctx.fillStyle = COL.treasure; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('3つから1つ選ぶ', ped.x, ped.y + 36); }
     else { const it = ped.item, fam = it.kind === 'heal' ? 'heal' : PART[it.id].fam; sign(ped.x, ped.y, fam, false);
       ctx.fillStyle = COL.text; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(itemName(it), ped.x, ped.y + 36);
-      const maxed = it.kind === 'part' && lv(it.id) >= TUNE.parts.maxLv;
+      const maxed = it.kind === 'part' && !canPatch(it.id);
       ctx.fillStyle = maxed ? COL.mut : G.scrap >= it.price ? COL.scrap : COL.mut; ctx.font = '700 12px Menlo, monospace'; ctx.fillText(maxed ? 'MAX' : '◆' + it.price, ped.x, ped.y + 50); }
   }
 }
@@ -1008,7 +1127,7 @@ function drawWorld() {
 }
 function drawStick() { if (!stick.on || (G.mode !== 'run' && G.mode !== 'home')) return; ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 48, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.55; ctx.fillStyle = COL.player; const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy), k = d > 48 ? 48 / d : 1; ctx.beginPath(); ctx.arc(stick.ox + dx * k, stick.oy + dy * k, 16, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
 function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + (s < 10 ? '0' : '') + s; }
-const SCREEN_MODES = ['shop', 'forge', 'store', 'talk', 'launch', 'swap', 'data'];   // 拠点の各画面＝上下の帯（HUD）を描かない（重なって読みにくい）
+const SCREEN_MODES = ['shop', 'forge', 'forgeSlot', 'store', 'talk', 'launch', 'swap', 'data'];   // 拠点の各画面＝上下の帯（HUD）を描かない（重なって読みにくい）
 function drawHUD() {
   layoutButtons();
   if (SCREEN_MODES.includes(G.mode)) { ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace'; ctx.textAlign = 'left'; ctx.fillText(VERSION, 14, L.h - L.sab - 5); return; }
@@ -1018,7 +1137,7 @@ function drawHUD() {
   const sxp = 14 + player.maxHp * 20 + 10; ctx.fillStyle = COL.scrap; dia(sxp + 6, L.sat + 23, 6); ctx.fill(); ctx.font = '700 13px Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(String(G.scrap), sxp + 16, L.sat + 28);
   ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left';
   if (G.floor) ctx.fillText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '   ROOM ' + G.roomsVisited + '/' + G.floor.n + '   KILL ' + G.kills + '   袋 ' + G.bag.length + '/' + G.bagMax + '   ' + fmt(G.time), 14, L.sat + 52);
-  if (G.home && G.mode !== 'title') { ctx.fillStyle = COL.scrap; ctx.font = '700 13px Menlo, monospace'; ctx.fillText('Cr ' + S.money, sxp + 40, L.sat + 28); ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('印刷所   DAY ' + S.day + '   袋 ' + S.bagMax + '   銃 ' + (GUN[S.gun] || GUNS[0]).name + '   台座に乗ると開く', 14, L.sat + 52); }
+  if (G.home && G.mode !== 'title') { ctx.fillStyle = COL.scrap; ctx.font = '700 13px Menlo, monospace'; ctx.fillText('Cr ' + S.money, sxp + 40, L.sat + 28); ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('印刷所   DAY ' + S.day + '   袋 ' + bagCap() + '   銃 ' + (GUN[S.gun] || GUNS[0]).name + (S.gunLv[S.gun] ? '+1' : '') + '   台座に乗ると開く', 14, L.sat + 52); }
   for (const [b, label] of [[BTN.sound, S.sound ? '♪' : '✕'], [BTN.pause, G.mode === 'pause' ? '▶' : G.home ? '≡' : '❚❚']]) { ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1); ctx.fillStyle = COL.text; ctx.font = '600 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, b.x + b.w / 2, b.y + 25); }
   // 下帯＝部品の列／計器／ミニマップ
   ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, L.h - L.botH, L.w, L.botH);
@@ -1030,9 +1149,9 @@ function drawHUD() {
       if (!r.visited) { ctx.strokeStyle = kc || (kind ? RK[kind].c : '#3a5590'); ctx.lineWidth = 1; ctx.globalAlpha = kc ? 1 : 0.7; ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1); ctx.globalAlpha = 1; }
       if (r.visited && r !== G.room && kc) { ctx.fillStyle = '#0b0f1a'; ctx.fillRect(x + 4, y + 4, 3, 3); } }
     ctx.fillStyle = COL.mut; ctx.font = '500 9px sans-serif'; ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4);
-    // 部品の列（所持している部品＝1文字＋Lv）
+    // スキルの列（合計Lv＝恒久＋パッチ。恒久だけのものは薄く・パッチが乗ったものは濃く）
     let px = 14, py = L.h - L.sab - 60; const pxMax = L.w - 14 - size - 40;
-    for (const p of PARTS) { const n = lv(p.id); if (!n) continue; if (px > pxMax) { px = 14; py -= 21; } ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(px, py, 34, 18); ctx.strokeStyle = RK[p.fam].c; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, 33, 17); ctx.fillStyle = RK[p.fam].c; ctx.font = '700 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.short + (n > 1 ? '×' + n : ''), px + 5, py + 13); px += 38; }
+    for (const p of SKILLS) { const n = lv(p.id); if (!n) continue; if (px > pxMax) { px = 14; py -= 21; } const hot = patchLv(p.id) > 0; ctx.globalAlpha = hot ? 1 : 0.55; ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(px, py, 34, 18); ctx.strokeStyle = RK[p.fam].c; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, 33, 17); ctx.fillStyle = RK[p.fam].c; ctx.font = '700 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.short + (n > 1 ? '×' + n : ''), px + 5, py + 13); ctx.globalAlpha = 1; px += 38; }
   }
   ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace';
   if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl + ' ' + G.room.type : '') + '  sa ' + L.satRaw + '/' + L.sabRaw + '→' + L.sat + '/' + L.sab + '  win ' + L.w + 'x' + L.h + (isStandalone() ? ' sa-mode' : ''), 14, L.h - L.sab - 17); }
@@ -1061,11 +1180,11 @@ function drawOverlays() {
     y = button('印刷所へ', y, () => enterHome(), G.saved ? null : COL.player, 'DAY ' + S.day + '　Cr ' + S.money + '　品 ' + wareCount() + '　◆' + S.scrapBank);
     y = button('データの書き出し／読み込み', y, () => { G.data = { msg: '' }; G.mode = 'data'; });
     centerText('動く＝避ける　止まる＝撃つ　フリック＝ダッシュ', y + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('ダンジョンで品を拾い、印刷所の店で売り、工房で銃を買う', y + 34, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('死ぬと品だけ失う。スクラップ・銃・袋は残る', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('ダンジョンで品を拾い、店で売るか、工房で義体・銃に焼き込む', y + 34, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('死ぬと品だけ失う。スクラップ・義体・銃・型は残る', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('フロアの出口で「帰る／進む」を選べる', y + 66, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　売上 Cr ' + S.earned, y + 90, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText(VERSION + '  Phase 3a お店経営の最小ループ', y + 110, '500 11px Menlo, monospace', COL.mut);
+    centerText(VERSION + '  Phase 3c-1 ビルドの骨（義体5部位・スキル表・焼き込む）', y + 110, '500 11px Menlo, monospace', COL.mut);
   } else if (G.mode === 'pause') {
     overlay(0.7); centerText('一時停止', cy - 190, '700 26px -apple-system, "Hiragino Sans", sans-serif');
     let y = cy - 150;
@@ -1078,15 +1197,15 @@ function drawOverlays() {
     { const cnt = {}; for (const id of G.bag) cnt[id] = (cnt[id] || 0) + 1; const txt = GOODS.filter(g => cnt[g.id]).map(g => g.ch + '×' + cnt[g.id]).join('　'); centerText('袋 ' + G.bag.length + '/' + G.bagMax + (txt ? '　' + txt : '　（空）') + '　銃 ' + G.gun.name, y + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut); }
   } else if (G.mode === 'choose' && G.choice) {
     overlay(0.78); const c = G.choice;
-    centerText(c.fam === 'implant' ? '義体を選ぶ' : c.fam === 'mod' ? '銃改造を選ぶ' : '報酬を選ぶ（義体か銃改造）', cy - 170, '700 22px -apple-system, "Hiragino Sans", sans-serif');
-    centerText('1つだけ持ち帰れる', cy - 148, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText(c.fam === 'implant' ? '義体パッチを選ぶ' : c.fam === 'mod' ? '銃パッチを選ぶ' : '報酬を選ぶ（義体パッチか銃パッチ）', cy - 170, '700 22px -apple-system, "Hiragino Sans", sans-serif');
+    centerText('この刷の間だけ効く（上限を超えると OC＝オーバークロック）', cy - 148, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     const w = Math.min(320, L.w - 40), h = 84, x = (L.w - w) / 2; let y = cy - 120;
     c.opts.forEach((p, i) => {
       const col = RK[p.fam].c; UI.push({ x, y, w, h, act: () => pickChoice(p) });
       ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
       sign(x + 24, y + 30, p.fam, false);
       ctx.fillStyle = col; ctx.font = '700 16px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.name, x + 46, y + 30);
-      ctx.fillStyle = COL.mut; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'right'; ctx.fillText(lv(p.id) ? 'Lv' + lv(p.id) + ' → ' + (lv(p.id) + 1) : 'NEW', x + w - 12, y + 30);
+      ctx.fillStyle = COL.mut; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'right'; ctx.fillText((lv(p.id) ? 'Lv' + lv(p.id) + ' → ' + (lv(p.id) + 1) : 'NEW') + (lv(p.id) + 1 > TUNE.skills.max ? ' OC' : ''), x + w - 12, y + 30);
       ctx.fillStyle = COL.text; ctx.font = '500 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.desc, x + 46, y + 56);
       y += h + 12;
     });
@@ -1095,7 +1214,7 @@ function drawOverlays() {
     if (G.overlayT > 0.4) { centerText('刷り直し', cy - 70, '800 40px -apple-system, "Hiragino Sans", sans-serif', COL.doorClosed, a); centerText('REPRINT', cy - 44, '600 12px Menlo, monospace', COL.mut, a);
       centerText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '　ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy - 4, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
       centerText('失ったもの＝品 ' + G.bag.length + '個（目安 Cr ' + bagValue() + '）', cy + 22, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.doorClosed, a);
-      centerText('残ったもの＝スクラップ ◆' + G.scrap + '・銃・袋・住人の記憶', cy + 42, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.scrap, a);
+      centerText('残ったもの＝スクラップ ◆' + G.scrap + '・義体・銃・型・住人の記憶', cy + 42, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.scrap, a);
       if (G.overlayT > 0.7) centerText('タップで印刷所へ（新しい体に刷り直す）', cy + 80, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink); }
   } else if (G.mode === 'floorclear') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.6 * a);
@@ -1105,6 +1224,10 @@ function drawOverlays() {
       let y = cy - 70;
       y = button(G.floorIdx + 2 >= TUNE.floors.length ? '進む（最終フロア＝ボス）' : '進む（FLOOR ' + (G.floorIdx + 2) + '）', y, () => nextFloor(), COL.portal, '深いほど良い品が出る。死ぬと袋の品は失う');
       y = button('帰る（印刷所へ）', y, () => leaveDungeon(), COL.player, '袋の品 ' + G.bag.length + '個とスクラップ ◆' + G.scrap + ' を全部持ち帰る');
+      const ei = exitInfo();   // 帰る材料（R16）＝いま帰れば作れる型／あと少しの型
+      if (ei.can.length) centerText('いま帰れば焼き込める＝' + ei.can.slice(0, 2).map(g => g.name).join('・') + (ei.can.length > 2 ? ' ほか' : ''), y + 6, '600 12px -apple-system, "Hiragino Sans", sans-serif', COL.mod, a);
+      else if (ei.near.length) { const nr = ei.near[0]; centerText('あと ' + Object.keys(nr.miss).map(k => GOOD[k].ch + '×' + nr.miss[k]).join(' ') + ' で ' + nr.g.name + '　←' + Object.keys(nr.miss).map(k => GOOD[k].src).join('・'), y + 6, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.text, a); }
+      else centerText('（袋と倉庫で作れる型はまだない）', y + 6, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
     } else centerText('……', cy - 40, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
   } else if (G.mode === 'win') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
@@ -1124,23 +1247,19 @@ function drawOverlays() {
     overlay(0.8); centerText('出撃口', cy - 200, '700 24px -apple-system, "Hiragino Sans", sans-serif', COL.exit);
     const g = GUN[S.gun] || GUNS[0]; let y = cy - 160;
     if (G.saved) y = button('続きから', y, () => resumeRun(G.saved), COL.player, (G.saved.floor + 1 >= TUNE.floors.length ? 'FINAL' : 'FLOOR ' + (G.saved.floor + 1)) + '　HP ' + G.saved.hp + '/' + G.saved.maxHp + '　◆' + G.saved.scrap + '　袋 ' + (G.saved.bag ? G.saved.bag.length : 0));
-    y = button(G.saved ? '新しい刷（続きは消える）' : '出撃（新しい刷）', y, () => { clearRun(); newRun(); }, G.saved ? null : COL.player, '銃＝' + g.name + '　袋 ' + S.bagMax + '枠');
+    y = button(G.saved ? '新しい刷（続きは消える）' : '出撃（新しい刷）', y, () => { clearRun(); newRun(); }, G.saved ? null : COL.player, '銃＝' + g.name + (S.gunLv[g.id] ? '+1' : '') + '　袋 ' + bagCap() + '枠　HP ' + (FRAME().hp + permLv('armor')));
     if (S.guns.length > 1) y = button('銃を替える: ' + g.name, y, () => { const i = S.guns.indexOf(S.gun); equipGun(S.guns[(i + 1) % S.guns.length]); }, COL.mod, g.desc);
     y = button('戻る', y, () => closeHome());
   } else if (G.mode === 'store') {
     overlay(0.8); centerText('倉庫', cy - 200, '700 24px -apple-system, "Hiragino Sans", sans-serif', COL.scrap);
-    centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '（3c で強化素材になる）', cy - 176, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    tileGrid(GOODS.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, 2);
-    centerText('売り物は店の棚へ。値付けは安／適／高の3段階', cy + 20, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    button('戻る', cy + 44, () => closeHome());
+    centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '　品は売るか、工房で焼き込む素材にする', cy - 176, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    const ny = tileGrid(GOODS.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base + '　' + g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, 2);
+    centerText('売り物は店の棚へ。値付けは安／適／高の3段階', ny + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    button('戻る', ny + 30, () => closeHome());
   } else if (G.mode === 'forge') {
-    overlay(0.82); centerText('工房', cy - 230, '700 24px -apple-system, "Hiragino Sans", sans-serif', COL.mod);
-    centerText('Cr ' + S.money + '　　銃は型に焼き込む＝次の刷から持って出られる', cy - 206, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    let y = cy - 190;
-    for (const g of GUNS) { const own = S.guns.includes(g.id), eq = S.gun === g.id;
-      y = button(g.name + (eq ? '　［装備中］' : own ? '　［持っている］' : '　Cr ' + g.price), y, () => { if (own) equipGun(g.id); else buyGun(g.id); }, eq ? COL.player : own ? COL.text : S.money >= g.price ? COL.mod : null, g.desc); }
-    y = button(S.bagMax >= TUNE.bag.max ? '持ち帰り枠＝上限（' + S.bagMax + '）' : '持ち帰り枠 +' + TUNE.bag.step + '（' + S.bagMax + '→' + (S.bagMax + TUNE.bag.step) + '）　Cr ' + TUNE.bag.price, y, () => buyBag(), S.bagMax < TUNE.bag.max && S.money >= TUNE.bag.price ? COL.scrap : null, '袋が大きいほど1回の刷で多く持ち帰れる');
-    y = button('戻る', y, () => closeHome());
+    drawForge(cy);
+  } else if (G.mode === 'forgeSlot' && G.forge) {
+    drawForgeSlot(cy);
   } else if (G.mode === 'talk') {
     overlay(0.82); centerText(NPC.name + '（' + NPC.title + '）', cy - 200, '700 22px -apple-system, "Hiragino Sans", sans-serif', COL.implant);
     ctx.fillStyle = COL.implant; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(L.w / 2, cy - 130, 34, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = COL.implant; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(L.w / 2, cy - 130, 34, 0, 6.2832); ctx.stroke();
@@ -1152,7 +1271,7 @@ function drawOverlays() {
     overlay(0.85); centerText('データの書き出し／読み込み', cy - 200, '700 20px -apple-system, "Hiragino Sans", sans-serif');
     centerText('ブラウザの保存領域は消えることがある。文字列をメモ等に控えておけば戻せる', cy - 176, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     let y = cy - 150;
-    y = button('書き出し（文字列をコピー）', y, () => dataExport(), COL.player, 'DAY ' + S.day + '　Cr ' + S.money + '　品 ' + wareCount() + '　銃 ' + S.guns.length + '丁' + (loadRun() ? '　＋中断中の刷' : ''));
+    y = button('書き出し（文字列をコピー）', y, () => dataExport(), COL.player, 'DAY ' + S.day + '　Cr ' + S.money + '　品 ' + wareCount() + '　銃 ' + S.guns.length + '丁　義体 ' + S.owned.length + '　型 ' + S.molds.length + (loadRun() ? '　＋中断中の刷' : ''));
     y = button('読み込み（コピーした文字列を貼り付け）', y, () => dataImport(), COL.doorClosed, '今のデータは上書きされる');
     if (G.data && G.data.msg) wrapText(G.data.msg, L.w / 2, y + 16, Math.min(320, L.w - 50), 18, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.text);
     button('戻る', y + 70, () => goTitle());
@@ -1175,6 +1294,68 @@ function tileGrid(items, y, cols) {   // 小さなタイルのグリッド（袋
     ctx.fillStyle = COL.text; ctx.font = (cols >= 4 ? '600 10px' : '600 11px') + ' -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(it.name, x + (cols >= 4 ? 26 : 30), yy + 21);
     ctx.fillStyle = COL.mut; ctx.font = '500 11px Menlo, monospace'; ctx.fillText(it.sub || '', x + 8, yy + 44); ctx.globalAlpha = 1; });
   return y + Math.ceil(items.length / cols) * (th + gap);
+}
+function skillLine(list) { return list.map(o => o.k.short + (o.n > 1 ? '×' + o.n : '')).join(' '); }
+function gearSkillText(g) { return Object.keys(g.skills).length ? Object.keys(g.skills).map(k => PART[k].name + ' Lv' + g.skills[k]).join('・') : 'スキル無し'; }
+function drawForge(cy) {   // 工房＝6マス（頭・胴・腕・腰・脚・銃）＋スキル合計1列。マスを押すとその部位の候補（R18＝1画面1判断）
+  overlay(0.85); const top = L.sat + 12;
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.mod; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('工房', 16, top + 24);
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money + '　品 ' + wareCount(), L.w - 16, top + 24);
+  centerText('部位を押す→候補を選ぶ。型は素材（品）と Cr で焼き込む', top + 46, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+  const items = SLOTS.map(sl => { const g = GEARM[S.gear[sl.id]]; return { ch: sl.ch, name: g.name, sub: Object.keys(g.skills).map(k => PART[k].short + g.skills[k]).join(' ') || '—', col: g.tier === 2 ? COL.portal : g.tier === 1 ? COL.implant : COL.mut, act: () => { G.forge = { slot: sl.id, msg: '' }; G.mode = 'forgeSlot'; } }; });
+  const gun = GUN[S.gun] || GUNS[0]; items.push({ ch: '銃', name: gun.name, sub: (S.gunLv[gun.id] ? PART[gun.sig].short + '1 ' : '') + '段' + (S.gunLv[gun.id] | 0), col: COL.mod, act: () => { G.forge = { slot: 'gun', msg: '' }; G.mode = 'forgeSlot'; } });
+  let y = tileGrid(items, top + 58, 3);
+  const pl = permList(); ctx.textAlign = 'left';
+  centerText('スキル合計（恒久）＝' + (pl.length ? skillLine(pl) : 'なし'), y + 14, '600 12px -apple-system, "Hiragino Sans", sans-serif', COL.text);
+  centerText('HP ' + (FRAME().hp + permLv('armor')) + '　速度 ' + Math.round(FRAME().spd * (1 + 0.12 * permLv('legs'))) + '　袋 ' + bagCap() + '　射程 ' + Math.round(gun.range * (1 + 0.25 * permLv('range')) * (1 + 0.15 * permLv('aim'))) + (S.bagBonus ? '　（旧版の枠 +' + S.bagBonus + ' を含む）' : ''), y + 32, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+  centerText('型（設計図）＝' + S.molds.length + '/' + GEAR.filter(g => g.tier > 0).length + '　王型の型はボスが落とす（死んでも残る）', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+  button('戻る', y + 66, () => closeHome());
+}
+function card(y, title, tag, tagCol, line2, line3, col, act) {   // 工房の候補カード＝3行（名前＋状態／スキル／材料）。act があれば押せる
+  const w = Math.min(340, L.w - 32), h = 66, x = (L.w - w) / 2; if (act) UI.push({ x, y, w, h, act });
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col || '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  ctx.textAlign = 'left'; ctx.fillStyle = col || COL.text; ctx.font = '700 14px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(title, x + 10, y + 20);
+  ctx.textAlign = 'right'; ctx.fillStyle = tagCol || COL.mut; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(tag, x + w - 10, y + 20);
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.text; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(line2, x + 10, y + 39);
+  if (line3) { let px = x + 10; ctx.font = '500 11px Menlo, monospace'; for (const seg of line3) { ctx.fillStyle = seg.col || COL.mut; ctx.fillText(seg.t, px, y + 57); px += ctx.measureText(seg.t).width; } }
+  return y + h + 8;
+}
+function costSegs(cost, cr) {   // 材料＝持っている分は普通の色・足りない分は赤（＋出どころ）
+  const segs = []; let firstMiss = null;
+  for (const k in cost) { const ok = haveOf(k) >= cost[k]; segs.push({ t: GOOD[k].ch + '×' + cost[k] + '(' + haveOf(k) + ') ', col: ok ? COL.text : COL.doorClosed }); if (!ok && !firstMiss) firstMiss = k; }
+  segs.push({ t: 'Cr ' + cr + ' ', col: S.money >= cr ? COL.scrap : COL.doorClosed });
+  if (firstMiss) segs.push({ t: '←' + GOOD[firstMiss].src, col: COL.doorClosed });
+  return segs;
+}
+function drawForgeSlot(cy) {   // 部位の候補＝標準／街路型／王型（または銃4丁＋段1）
+  overlay(0.85); const f = G.forge, top = L.sat + 12;
+  if (f.slot === 'gun') {
+    ctx.textAlign = 'left'; ctx.fillStyle = COL.mod; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('銃', 16, top + 24);
+    ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money, L.w - 16, top + 24);
+    let y = top + 44;
+    for (const g of GUNS) { const own = S.guns.includes(g.id), eq = S.gun === g.id, lvl = S.gunLv[g.id] | 0;
+      y = card(y, g.name + (lvl ? '＋1' : ''), eq ? '装備中' : own ? '持っている→装備' : '買う Cr ' + g.price, eq ? COL.player : own ? COL.text : S.money >= g.price ? COL.mod : COL.mut, g.desc + (lvl ? '　段1＝' + PART[g.sig].name + ' +1' : ''), null, eq ? COL.player : own ? COL.text : COL.mod, () => { if (own) { equipGun(g.id); forgeMsg(g.name + ' を装備した'); } else if (buyGun(g.id)) forgeMsg(g.name + ' を買って装備した'); else forgeMsg('Cr が足りない（' + g.price + ' 必要）'); }); }
+    const gun = GUN[S.gun] || GUNS[0];
+    if (!(S.gunLv[gun.id] | 0)) y = card(y, gun.name + ' に段1を焼き込む', '性格スキル', COL.mod, PART[gun.sig].name + ' +1（' + PART[gun.sig].desc + '）', costSegs(gun.cost1, gun.cr1), COL.mod, () => forgeGun(gun.id));
+    else y = card(y, gun.name + '　段1 済', '派生は 3c-2', COL.mut, PART[gun.sig].name + ' +1 が恒久で付いている', null, COL.mut, null);
+    if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(330, L.w - 40), 16, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.text) + 4;
+    button('戻る', Math.max(y + 4, L.h - L.sab - 110), () => { G.mode = 'forge'; G.forge = null; });
+    return;
+  }
+  const sl = SLOT[f.slot], cur = GEARM[S.gear[sl.id]];
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.implant; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(sl.name + '（' + sl.part + '）＝' + sl.desc, 16, top + 24);
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money, L.w - 16, top + 24);
+  let y = top + 44;
+  for (const g of GEAR.filter(g => g.slot === sl.id)) {
+    const eq = cur === g, own = g.tier === 0 || S.owned.includes(g.id), mold = g.tier === 0 || S.molds.includes(g.id);
+    const tag = eq ? '装備中' : own ? '持っている→装備' : mold ? '型あり→焼き込む' : '型なし（ボスが落とす）';
+    const tagCol = eq ? COL.player : own ? COL.text : mold ? COL.mod : COL.mut;
+    const col = eq ? COL.player : g.tier === 2 ? COL.portal : g.tier === 1 ? COL.implant : COL.mut;
+    const act = eq ? null : own ? () => equipGear(g.id) : mold ? () => craftGear(g.id) : null;
+    y = card(y, g.name, tag, tagCol, gearSkillText(g), (!own && g.cost) ? costSegs(g.cost, g.cr) : null, col, act);
+  }
+  if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(330, L.w - 40), 16, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.text) + 4;
+  button('戻る', Math.max(y + 4, L.h - L.sab - 110), () => { G.mode = 'forge'; G.forge = null; });
 }
 function drawShop(cy) {   // 店の1日＝上に棚3つ、中に客が歩く土間、下にボタン
   const sh = G.shop; overlay(0.92);
@@ -1242,10 +1423,11 @@ function frame(t) {
 }
 
 // ---------- デバッグ用フック（PC確認用・ゲームには影響しない）----------
-const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, S, M, D, newRun, nextFloor, resumeRun, loadRun, saveRun, clearRun, genFloor, god: false, forced: null,
+const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, get S() { return S; }, M, D, newRun, nextFloor, resumeRun, loadRun, saveRun, clearRun, genFloor, god: false, forced: null,
   setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { while (enemies.length) killEnemy(enemies.length - 1); },
   step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else if (G.mode === 'home') updateHome(1 / 60); else if (G.mode === 'shop') updateShop(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom,
-  GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, buyBag, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; } };
+  GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; },
+  SKILLS, SLOTS, GEAR, GEARM, FRAMES, FRAME, lv, permLv, patchLv, canPatch, computePerm, bagCap, craftGear, equipGear, forgeGun, awardMold, roomGoods, treasureGoods, bossGoods, exitInfo, missingFor, permList, migrateS, spawnEnemies };
 
 // ---------- 起動 ----------
 layout();
