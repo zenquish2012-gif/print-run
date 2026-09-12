@@ -32,7 +32,7 @@
    スクラップ（素材）／中断セーブ（シード＋部屋の進捗＝部屋に入った時点へ戻る）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ
    ===================================================================== */
-const VERSION = 'p2-0.1.0';
+const VERSION = 'p2-0.2.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -54,8 +54,9 @@ const TUNE = {
     { rooms: [9, 12],  room: { base: 4, rand: 4, max: 8 }, hp: 1 },
     { boss: true },
   ],
-  boss:    { hp: 220, hpPerMod: 0.35, r: 26, spd: 55, tell: 0.7, rest: 0.9, ringN: 12, ringSpd: 175, chargeSpd: 560, chargeT: 0.55, volleyN: 3, volleySpd: 330, enrageAt: 0.5, contact: 1 }, // ボス: HP（＋銃改造の合計Lv×hpPerMod 倍＝ビルドが強いほど長く戦う）／半径／歩く速さ／予兆(秒)／技の間(秒)／放射弾の数・速さ／突進の速さ・時間／三連射の数・速さ／怒りに入るHP割合
-  loot:    { scrapDrop: 0.35, scrapReward: 4, scrapPerFloor: 2, heal: 2, pricePart: 7, priceHeal: 4, priceStep: 2, bossScrap: 12 }, // 撃破時のスクラップ落下率／部屋報酬のスクラップ（＋フロア×2）／回復量／商人の値段（＋フロア×step）
+  boss:    { hp: 220, hpPerMod: 0.35, r: 26, spd: 55, tell: 0.7, rest: 0.9, ringN: 12, ringSpd: 175, chargeSpd: 560, chargeT: 0.55, volleyN: 3, volleySpd: 330, enrageAt: 0.5, contact: 1,
+             ringGapDeg: 80, ringGapEnraged: 20, ringLaneMinOff: 45, ringLaneMaxOff: 100, ringTellK: 1.5, ringWithMinions: false }, // ボス: HP（＋銃改造の合計Lv×hpPerMod 倍＝ビルドが強いほど長く戦う）／半径／歩く速さ／予兆(秒)／技の間(秒)／放射弾の数・速さ／突進の速さ・時間／三連射の数・速さ／怒りに入るHP割合。p2-0.2.0（マスター「放射弾は逃げるスペースがない」）＝放射弾に「安全な扇（レーン）」を開ける＝幅 ringGapDeg 度（怒り時＋ringGapEnraged）・向きは主人公の方向から ringLaneMinOff〜ringLaneMaxOff 度ずらす（動かないと当たる・扇の縁まで最大 maxOff−gap/2 度＝半径140pxで約150px＝予兆の間に歩いて届く）・予兆は tell×ringTellK 秒で扇を見せる／ringWithMinions=false＝手下が生きている間は放射弾を撃たない（突進・三連射のみ）
+  loot:    { scrapDrop: 0.35, scrapReward: 4, scrapPerFloor: 2, heal: 2, pricePart: 5, priceHeal: 3, priceStep: 1, bossScrap: 12 }, // 撃破時のスクラップ落下率／部屋報酬のスクラップ（＋フロア×2）／回復量／商人の値段（＋フロア×step）。p2-0.2.0＝マスター「貯まり方に対して少し高い」で 7/4/2 → 5/3/1（部品 5→6→7・回復 3→4→5）
   parts:   { maxLv: 3, nanoNeed: 4 },                                                             // 部品の最大レベル／修復ナノ＝部屋クリア (nanoNeed−Lv) 回ごとに HP+1
 };
 const COL = {
@@ -400,7 +401,7 @@ function spawnMinion(x, y, delay) { enemies.push({ type: 'rusher', x, y, r: 13, 
 function spawnBoss() {
   const B = TUNE.boss, p = freeNear(RW / 2, TILE * 5);
   const modLv = PARTS.filter(q => q.fam === 'mod').reduce((a, q) => a + lv(q.id), 0), hp = Math.round(B.hp * (1 + B.hpPerMod * modLv));
-  const b = { type: 'boss', x: p.x, y: p.y, r: B.r, hp, maxHp: hp, st: 'spawn', t: 1.5, pat: 'ring', seq: 0, enraged: false, dx: 0, dy: 1, flash: 0, face: Math.PI / 2, sx: p.x, sy: p.y, stuckT: 0, nudgeT: 0, nudge: 0, tellT: 0 };
+  const b = { type: 'boss', x: p.x, y: p.y, r: B.r, hp, maxHp: hp, st: 'spawn', t: 1.5, pat: 'ring', seq: 0, enraged: false, dx: 0, dy: 1, flash: 0, face: Math.PI / 2, sx: p.x, sy: p.y, stuckT: 0, nudgeT: 0, nudge: 0, tellT: 0, lane: 0 };
   enemies.push(b); G.boss = b; SFX.spawn();
 }
 function clearRoom() {
@@ -611,6 +612,7 @@ function killEnemy(k) {
   // 部屋の最後の1体＝報酬がその場に出る（Hades の「部屋クリアで報酬」）
   if (enemies.length === 0 && !G.room.cleared && (G.room.type === 'normal' || G.room.type === 'exit') && G.room.reward && !G.room.rewardTaken) { const p = freeNear(e.x, e.y); spawnReward(G.room, p); }
 }
+function angDiff(a, b) { return Math.abs((((a - b) % 6.2832) + 9.4248) % 6.2832 - 3.1416); }   // 2つの角度の差（0〜π）
 function walkTo(e, dt, spd, prefer, dx, dy, d) { let v = null; if (e.nudgeT > 0) { e.nudgeT -= dt; v = { x: Math.cos(e.nudge), y: Math.sin(e.nudge) }; } else if (prefer && los(e.x, e.y, player.x, player.y)) v = { x: dx / d, y: dy / d }; else v = flowDir(e) || { x: dx / d, y: dy / d }; moveCircle(e, v.x * spd * dt, v.y * spd * dt); e.face = Math.atan2(v.y, v.x); }
 function enemyShot(x, y, a, spd, r) { bullets.push({ x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: r || 5, from: 'e', life: 4 }); }
 function updateEnemy(e, dt) {
@@ -640,14 +642,20 @@ function updateEnemy(e, dt) {
     }
   }
 }
-// ボス＝3つの技（放射弾・突進・三連射）を順に。予兆つき。HP半分で怒り＝間が短く・放射が増え・手下2体
+// ボス＝3つの技（放射弾・突進・三連射）を順に。予兆つき。HP半分で怒り＝間が短く・放射が増え・手下2体（手下が生きている間は放射弾なし＝p2-0.2.0）
+function ringHalf(e) { return (TUNE.boss.ringGapDeg + (e.enraged ? TUNE.boss.ringGapEnraged : 0)) * Math.PI / 360; }   // 安全な扇の半角（rad）
 function updateBoss(e, dt, dx, dy, d) {
   const B = TUNE.boss, k = e.enraged ? 0.65 : 1;
   if (!e.enraged && e.hp <= e.maxHp * B.enrageAt) { e.enraged = true; banner('!! ENRAGED !!', 1.2); SFX.bossTell(); G.shake = 6; spawnMinion(TILE * 2, TILE * 2, 0); spawnMinion(RW - TILE * 2, RH - TILE * 2, 0.2); }
   switch (e.st) {
     case 'spawn': e.t -= dt; e.face = Math.atan2(dy, dx); if (e.t <= 0) { e.st = 'rest'; e.t = 0.5; } break;
     case 'rest': e.t -= dt; walkTo(e, dt, B.spd, true, dx, dy, d);
-      if (e.t <= 0) { const order = ['ring', 'charge', 'volley']; e.pat = order[e.seq % 3]; e.seq++; if (e.enraged && Math.random() < 0.3) e.pat = 'charge'; e.st = 'tell'; e.t = B.tell * (e.pat === 'volley' ? 0.8 : 1); e.tellT = e.t; SFX.bossTell(); } break;
+      if (e.t <= 0) {
+        const order = ['ring', 'charge', 'volley']; e.pat = order[e.seq % 3]; e.seq++; if (e.enraged && Math.random() < 0.3) e.pat = 'charge';
+        if (!B.ringWithMinions && e.pat === 'ring' && enemies.some(m => m !== e)) e.pat = 'volley';   // 手下が生きている間は放射弾を撃たない（p2-0.2.0）＝三連射に置き換える（突進に置き換えると手下の突進と重なって突進だらけになる＝PC実測 77%）
+        if (e.pat === 'ring') { const pa = Math.atan2(dy, dx), off = (B.ringLaneMinOff + Math.random() * (B.ringLaneMaxOff - B.ringLaneMinOff)) * Math.PI / 180; e.lane = pa + (Math.random() < 0.5 ? off : -off); }   // 安全な扇の向き＝主人公の今の方向から ringLaneMinOff 度以上ずらす＝「扇へ動く」だけで避けられる
+        e.st = 'tell'; e.t = B.tell * (e.pat === 'volley' ? 0.8 : e.pat === 'ring' ? B.ringTellK : 1); e.tellT = e.t; SFX.bossTell();
+      } break;
     case 'tell': e.t -= dt; e.face = Math.atan2(dy, dx);
       if (e.t <= 0) {
         if (e.pat === 'ring') { e.st = 'ring'; e.t = 0; e.n = 0; }
@@ -655,7 +663,7 @@ function updateBoss(e, dt, dx, dy, d) {
         else { e.st = 'volley'; e.t = 0; e.n = 0; }
       } break;
     case 'ring': e.t -= dt;
-      if (e.t <= 0) { const N = B.ringN + (e.enraged ? 4 : 0), off = (e.n % 2) * Math.PI / N + Math.random() * 0.2; for (let i = 0; i < N; i++) enemyShot(e.x, e.y, off + i * 6.2832 / N, B.ringSpd, 5); SFX.bossRing(); G.shake = 4; e.n++; e.t = 0.42; if (e.n >= (e.enraged ? 3 : 2)) { e.st = 'rest'; e.t = B.rest * k; } } break;
+      if (e.t <= 0) { const N = B.ringN + (e.enraged ? 4 : 0), off = (e.n % 2) * Math.PI / N + Math.random() * 0.2, half = ringHalf(e); for (let i = 0; i < N; i++) { const a = off + i * 6.2832 / N; if (angDiff(a, e.lane) < half) continue; enemyShot(e.x, e.y, a, B.ringSpd, 5); } SFX.bossRing(); G.shake = 4; e.n++; e.t = 0.42; if (e.n >= (e.enraged ? 3 : 2)) { e.st = 'rest'; e.t = B.rest * k; } } break;
     case 'charge': e.t -= dt; { const hit = moveCircle(e, e.dx * B.chargeSpd * dt, e.dy * B.chargeSpd * dt); parts.push({ x: e.x - e.dx * 10, y: e.y - e.dy * 10, vx: 0, vy: 0, life: 0.2, max: 0.2, col: COL.boss, size: 14 }); if (hit) { e.t = Math.min(e.t, 0.05); G.shake = 5; } } if (e.t <= 0) { e.st = 'rest'; e.t = B.rest * k * 1.3; } break;
     case 'volley': e.t -= dt; e.face = Math.atan2(dy, dx);
       if (e.t <= 0) { const a = Math.atan2(dy, dx); for (let i = 0; i < B.volleyN; i++) enemyShot(e.x, e.y, a + (i - (B.volleyN - 1) / 2) * 0.16, B.volleySpd, 5); SFX.eshot(); e.n++; e.t = 0.3; if (e.n >= (e.enraged ? 3 : 2)) { e.st = 'rest'; e.t = B.rest * k; } } break;
@@ -726,6 +734,14 @@ function drawBoss(e) {
   const B = TUNE.boss;
   if (e.st === 'spawn') { const k = 1 - Math.max(0, e.t) / 1.5; ctx.strokeStyle = COL.boss; ctx.globalAlpha = 0.3 + 0.6 * k; ctx.lineWidth = 3; ctx.setLineDash([6, 6]); hex(e.x, e.y, e.r + (1 - k) * 60, e.t); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; return; }
   const tell = e.st === 'tell', k = tell ? 1 - e.t / (e.tellT || 1) : 0;
+  if ((tell || e.st === 'ring') && e.pat === 'ring') {   // 安全な扇（p2-0.2.0）＝予兆中に濃くなり、撃っている間も薄く残す
+    const half = ringHalf(e), R = 700, a0 = e.lane - half, a1 = e.lane + half;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, RW, RH); ctx.clip();   // 部屋の外へはみ出さない
+    ctx.fillStyle = COL.player; ctx.globalAlpha = tell ? 0.08 + 0.16 * k : 0.10; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.arc(e.x, e.y, R, a0, a1); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = COL.player; ctx.globalAlpha = tell ? 0.35 + 0.5 * k : 0.3; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x + Math.cos(a0) * R, e.y + Math.sin(a0) * R); ctx.lineTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(a1) * R, e.y + Math.sin(a1) * R); ctx.stroke(); ctx.setLineDash([]);
+    if (tell) { ctx.globalAlpha = 0.5 + 0.5 * k; ctx.fillStyle = COL.player; ctx.font = '700 13px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('SAFE', e.x + Math.cos(e.lane) * 120, e.y + Math.sin(e.lane) * 120 + 5); }
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
   if (tell && e.pat === 'ring') { ctx.strokeStyle = COL.ebullet; ctx.globalAlpha = 0.25 + 0.5 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 8]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 14 + k * 30, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
   if (tell && e.pat === 'charge') { ctx.strokeStyle = COL.boss; ctx.globalAlpha = 0.3 + 0.5 * k; ctx.lineWidth = 3; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(e.face) * 600, e.y + Math.sin(e.face) * 600); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
   if (tell && e.pat === 'volley') { ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.3 + 0.5 * k; ctx.lineWidth = k > 0.7 ? 2.5 : 1; ctx.setLineDash([6, 6]); for (let i = 0; i < B.volleyN; i++) { const a = e.face + (i - (B.volleyN - 1) / 2) * 0.16; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(a) * 500, e.y + Math.sin(a) * 500); ctx.stroke(); } ctx.setLineDash([]); ctx.globalAlpha = 1; }

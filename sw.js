@@ -1,7 +1,7 @@
 // PRINT RUN Service Worker（オフライン起動用）
 // 方針: ページ本体（index.html）はネットワーク優先・失敗時はキャッシュ／それ以外はキャッシュ優先。
 // 版が上がったら CACHE 名を変える（古いキャッシュは activate で削除）。
-const CACHE = 'pr-p2-0.1.0';
+const CACHE = 'pr-p2-0.2.0';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
