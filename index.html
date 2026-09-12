@@ -33,7 +33,7 @@
    フロア出口で「帰る／進む」／死ぬと品だけ失う（設計図・スクラップ・型は残る）／住人の1行／データの書き出し・読み込み を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p3a-0.1.0';
+const VERSION = 'p3a-0.1.1';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -476,6 +476,17 @@ function dropScrap(x, y, n) { for (let i = 0; i < n; i++) { const a = Math.rando
 function addScrap(n) { G.scrap += n; }
 function rollGood(tier) { const w = GOOD_W[Math.min(tier, GOOD_W.length - 1)]; let t = w.reduce((a, b) => a + b, 0), x = Math.random() * t; for (let i = 0; i < GOODS.length; i++) { x -= w[i]; if (x < 0) return GOODS[i].id; } return GOODS[0].id; }
 function spawnGoods(x, y, n, tier) { for (let i = 0; i < n; i++) { const a = Math.random() * 6.2832, v = 60 + Math.random() * 60; G.pickups.push({ kind: 'good', id: rollGood(tier), x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0 }); } }
+function spawnGoodsAround(x, y, n, tier) {   // 品を (x,y) のタイルの隣の床タイルへ1個ずつ置く（報酬の印・台座の真上に落とさない＝p3a-0.1.1）。隣が足りない分は従来どおり散らす
+  const c0 = Math.floor(x / TILE), r0 = Math.floor(y / TILE); const cand = [];
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { if (!dr && !dc) continue; const c = c0 + dc, r = r0 + dr; if (c < 1 || r < 1 || c >= COLS - 1 || r >= ROWS - 1 || G.tiles[c + r * COLS] !== 0) continue; cand.push({ x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 }); }
+  for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cand[i], cand[j]] = [cand[j], cand[i]]; }
+  let k = 0;
+  for (; k < n && k < cand.length; k++) G.pickups.push({ kind: 'good', id: rollGood(tier), x: cand[k].x + (Math.random() - 0.5) * 6, y: cand[k].y + (Math.random() - 0.5) * 6, vx: 0, vy: 0, t: 0 });
+  if (k < n) spawnGoods(x, y, n - k, tier);
+}
+function holdPickups() {   // 画面（入れ替え・3択）を閉じた直後、足元にある品・報酬の印は「一度離れてから」でないと拾わない（画面が続けて出るのを防ぐ）
+  for (const p of G.pickups) { if (p.kind !== 'good' && p.kind !== 'reward') continue; if (Math.hypot(player.x - p.x, player.y - p.y) < player.r + 22) p.hold = true; }
+}
 function bagFull() { return G.bag.length >= G.bagMax; }
 function pickGood(p) {   // 品に触れた＝枠が空いていれば入れる。満杯なら入れ替え画面（捨てる物を1つ選ぶ／拾わない）
   const g = GOOD[p.id];
@@ -483,9 +494,9 @@ function pickGood(p) {   // 品に触れた＝枠が空いていれば入れる�
   G.swap = { id: p.id, x: p.x, y: p.y }; G.mode = 'swap'; stick.on = false; SFX.deny(); return false;
 }
 function swapPick(i) {   // i＝捨てる袋の位置（-1＝拾わない）。捨てた品は消える（仮決め）
-  const sw = G.swap; if (!sw) return; G.swap = null; G.mode = 'run';
+  const sw = G.swap; if (!sw) return; G.swap = null; G.mode = 'run'; holdPickups();
   if (i >= 0 && i < G.bag.length) { const old = G.bag[i]; G.bag[i] = sw.id; G.goodsGot++; SFX.pick(); floatText(player.x, player.y - 22, GOOD[old].name + ' を捨てて ' + GOOD[sw.id].name, GOOD[sw.id].col); saveRun(); }
-  else { G.pickups.push({ kind: 'good', id: sw.id, x: sw.x, y: sw.y, vx: 0, vy: 0, t: -1.2 }); }   // 拾わない＝その場に残す（1.2秒は再び拾わない）
+  else { G.pickups.push({ kind: 'good', id: sw.id, x: sw.x, y: sw.y, vx: 0, vy: 0, t: -1.2, hold: true }); }   // 拾わない＝その場に残す（一度離れてから拾う＝p3a-0.1.1）
 }
 function rollParts(fam, n) {   // fam: 'implant' | 'mod' | 'any'。上限レベルの部品は出さない（全部上限なら重複可）
   let pool = PARTS.filter(p => (fam === 'any' || p.fam === fam) && lv(p.id) < TUNE.parts.maxLv);
@@ -509,12 +520,13 @@ function takeReward(pk) {
 }
 function pickChoice(p) {
   const c = G.choice; if (!c) return; G.choice = null; G.mode = 'run';
+  holdPickups();
   applyPart(p);
   if (c.from === 'treasure') { G.room.rewardTaken = true; G.peds = G.peds.filter(q => q.kind !== 'treasure'); }
   saveRun();
 }
 function touchPed(ped) {
-  if (ped.kind === 'treasure') { openChooser('any', 'treasure'); spawnGoods(ped.x, ped.y, TUNE.goods.treasure, G.floorIdx); return; }
+  if (ped.kind === 'treasure') { openChooser('any', 'treasure'); spawnGoodsAround(ped.x, ped.y, TUNE.goods.treasure, G.floorIdx); return; }
   const it = ped.item; if (it.sold) return;
   if (it.kind === 'part' && lv(it.id) >= TUNE.parts.maxLv) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'Lv MAX（これ以上は付かない）', COL.mut); } return; }
   if (G.scrap < it.price) { if (ped.msgT <= 0) { ped.msgT = 1.2; SFX.deny(); floatText(ped.x, ped.y - 30, 'スクラップ不足（◆' + it.price + '）', COL.mut); } return; }
@@ -674,8 +686,10 @@ function update(dt) {
       const dx = player.x - p.x, dy = player.y - p.y, d = Math.hypot(dx, dy); if (d < 70 && p.t > 0.25) { p.x += dx / d * 260 * dt; p.y += dy / d * 260 * dt; }
       if (d < player.r + 8) { G.pickups.splice(i, 1); addScrap(1); SFX.scrap(); } }
     else if (p.kind === 'good') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; if (solidAt(p.x, p.y)) { p.vx = -p.vx; p.vy = -p.vy; p.x += p.vx * dt * 2; p.y += p.vy * dt * 2; }
-      if (p.t > 0.3 && Math.hypot(player.x - p.x, player.y - p.y) < player.r + 14) { G.pickups.splice(i, 1); pickGood(p); if (G.mode !== 'run') return; } }
-    else if (Math.hypot(player.x - p.x, player.y - p.y) < player.r + 16) { G.pickups.splice(i, 1); takeReward(p); if (G.mode !== 'run') return; }
+      const d = Math.hypot(player.x - p.x, player.y - p.y); if (p.hold) { if (d > player.r + 24) p.hold = false; continue; }
+      if (p.t > 0.3 && d < player.r + 14) { G.pickups.splice(i, 1); pickGood(p); if (G.mode !== 'run') return; } }
+    else { const d = Math.hypot(player.x - p.x, player.y - p.y); if (p.hold) { if (d > player.r + 24) p.hold = false; continue; }
+      if (d < player.r + 16) { G.pickups.splice(i, 1); takeReward(p); if (G.mode !== 'run') return; } }
   }
   for (const ped of G.peds) { ped.t += dt; ped.msgT -= dt; const d = Math.hypot(player.x - ped.x, player.y - ped.y); if (d < player.r + 17) { touchPed(ped); if (G.mode !== 'run') return; } }
   // 部屋クリア・出口
@@ -793,8 +807,11 @@ function killEnemy(k) {
   burst(e.x, e.y, e.type === 'rusher' ? COL.rusher : COL.shooter, 16, 160, 0.6, 3); SFX.kill();
   if (Math.random() < TUNE.loot.scrapDrop) dropScrap(e.x, e.y, 1);
   // 部屋の最後の1体＝報酬がその場に出る（Hades の「部屋クリアで報酬」）
-  if (enemies.length === 0 && !G.room.cleared && (G.room.type === 'normal' || G.room.type === 'exit') && G.room.reward && !G.room.rewardTaken) { const p = freeNear(e.x, e.y); spawnReward(G.room, p); }
-  if (enemies.length === 0 && !G.room.cleared && (G.room.type === 'normal' || G.room.type === 'exit')) { const [a, b] = TUNE.goods.perRoom; spawnGoods(e.x, e.y, a + Math.floor(Math.random() * (b - a + 1)), G.floorIdx); }   // 品＝部屋の最後の1体が落とす（Phase 3a）
+  if (enemies.length === 0 && !G.room.cleared && (G.room.type === 'normal' || G.room.type === 'exit')) {
+    const p = freeNear(e.x, e.y);
+    if (G.room.reward && !G.room.rewardTaken) spawnReward(G.room, p);
+    const [a, b] = TUNE.goods.perRoom; spawnGoodsAround(p.x, p.y, a + Math.floor(Math.random() * (b - a + 1)), G.floorIdx);   // 品＝部屋の最後の1体が落とす（Phase 3a）。報酬の印の隣のタイルへ置く（重ねない＝p3a-0.1.1）
+  }
 }
 function angDiff(a, b) { return Math.abs((((a - b) % 6.2832) + 9.4248) % 6.2832 - 3.1416); }   // 2つの角度の差（0〜π）
 function walkTo(e, dt, spd, prefer, dx, dy, d) { let v = null; if (e.nudgeT > 0) { e.nudgeT -= dt; v = { x: Math.cos(e.nudge), y: Math.sin(e.nudge) }; } else if (prefer && los(e.x, e.y, player.x, player.y)) v = { x: dx / d, y: dy / d }; else v = flowDir(e) || { x: dx / d, y: dy / d }; moveCircle(e, v.x * spd * dt, v.y * spd * dt); e.face = Math.atan2(v.y, v.x); }
@@ -1228,7 +1245,7 @@ function frame(t) {
 const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, S, M, D, newRun, nextFloor, resumeRun, loadRun, saveRun, clearRun, genFloor, god: false, forced: null,
   setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { while (enemies.length) killEnemy(enemies.length - 1); },
   step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else if (G.mode === 'home') updateHome(1 / 60); else if (G.mode === 'shop') updateShop(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom,
-  GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, buyBag, pickGood, swapPick, spawnGoods, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; } };
+  GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, buyBag, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; } };
 
 // ---------- 起動 ----------
 layout();
