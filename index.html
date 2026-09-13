@@ -26,8 +26,10 @@
 <script>
 'use strict';
 /* =====================================================================
-   PRINT RUN ―弾丸輪廻―  Phase 5-0 画像パイプラインの実測（p50）＝主人公と突進型を Gemini 生成のドット絵（img/hero.png・img/rusher.png＝64×64透過）に差し替え
-   （体は左右2方向＝右向きの絵を反転・銃＝照準線だけ360°回る／足元の影はゲーム側／画像が読めなければ従来の図形＝ゲームの中身は 3c-1 のまま）
+   PRINT RUN ―弾丸輪廻―  Phase 5-1 キャラの動き（p51・要件定義 #28〜#30・R21〜R26）＝走り4コマのシート（img/hero_run.png・img/rusher_run.png）＋銃4丁（img/guns.png・体と別画像で360°回転・左向きは上下反転）
+   ＋手続き型（待機の呼吸・ダッシュの伸び・予兆の沈み込み・足元の砂煙・死亡は倒れる）。画像が無ければ従来の図形。ゲームの中身は 3c-1 のまま。
+   Phase 5-0 画像パイプラインの実測（p50）＝主人公と突進型を Gemini 生成のドット絵（img/hero.png・img/rusher.png＝64×64透過）に差し替え
+   （体は左右2方向＝右向きの絵を反転／足元の影はゲーム側／画像が読めなければ従来の図形）
    Phase 3c-1 ビルドの骨（p3c1）＝MH Wilds型ビルドシステムの骨（要件定義 #20〜#27・R10〜R20）
    Phase 3a（拠点＝印刷所・品・持ち帰り枠・倉庫・店の1日・金・工房＝銃4種・住人・帰る/進む・死亡ロスト・書き出し/読み込み）の上に、
    スキル表1本（SKILLS＝義体スキル11＋銃スキル5。恒久＝装備の土台Lv／パッチ＝ラン中だけ+Lv・上限超え＝オーバークロック）／
@@ -36,7 +38,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p50-0.1.0';
+const VERSION = 'p51-0.1.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -51,7 +53,8 @@ const TUNE = {
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
   shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1, nearMax: 0.6 }, // 射撃型: 近すぎ→下がる（nearMax 秒以上続いたら至近で撃つ）／狙い(秒)／照準ロック(残り秒)／弾速／再装填
   room:    { bonusFrom: 3, spawnDist: 170 },                                                      // 3部屋目以降は敵+1／主人公からの最短出現距離
-  sprite:  { on: true, scale: 1, faceHys: 0.2, shadow: 0.28 },                                    // Phase 5-0: 画像（64×64ドット）を使うか／1ドット＝何px／左右の向きを変える閾値（cos）／足元の影の濃さ。画像が読めなければ図形で描く
+  sprite:  { on: true, scale: 1, faceHys: 0.2, shadow: 0.28,                                      // Phase 5-0: 画像（64×64ドット）を使うか／1ドット＝何px／左右の向きを変える閾値（cos）／足元の影の濃さ。画像が読めなければ図形で描く
+             runFps: 10, rusherFps: 9, dashFps: 16, idleBob: 1, dust: true, hand: { x: 7, y: 4 } },  // Phase 5-1: 走りのコマ送り（コマ/秒・速さに比例）／突進型の走り／ダッシュ中／待機の呼吸（ドット）／足元の砂煙／銃の軸（体の中心からの手の位置・右向き時）
   // フロアごとの差分（Phase 2）。rooms＝部屋数の範囲／room＝1部屋の敵＝base+0..rand-1（上限max）／hp＝敵HPの加算。フロア1は Phase 1 と同じ値（難度はマスター判断で据え置き）
   floors: [
     { rooms: [7, 9],   room: { base: 3, rand: 3, max: 6 }, hp: 0 },
@@ -256,17 +259,44 @@ const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 // ---------- スプライト画像（Phase 5-0）----------
 // Gemini 生成→ _script_sprite.py で透過 64×64 ドットにした PNG。読めない間（初回のオフライン等）は従来の図形で描く。
 // 向き＝体は左右2方向（右向きの絵を反転）・銃（照準線）だけ360°回る（05_画像生成 §2 の仮決め）。
+// Phase 5-1（2026-09-13・要件定義 #28〜#30・R21〜R26）＝走り4コマのシート（hero_run／rusher_run＝64×64×4）＋銃4丁（guns＝32×32×4・握りが (10,19)）。
+// 動き＝走りは実コマ・待機/ダッシュ/被弾/死亡は手続き型（呼吸の弾み・伸び縮み・白点滅・倒れ）。銃は体と別画像で360°回り、左向きは上下反転。
 const IMG = {};
-const IMG_FILES = { hero: 'img/hero.png', rusher: 'img/rusher.png' };
+const IMG_FILES = { hero: ['img/hero.png', 64], heroRun: ['img/hero_run.png', 64], rusher: ['img/rusher.png', 64], rusherRun: ['img/rusher_run.png', 64], guns: ['img/guns.png', 32] };
+const GUNIMG = { hand: { fr: 0, mz: 8 }, smg: { fr: 1, mz: 12 }, shot: { fr: 2, mz: 16 }, ar: { fr: 3, mz: 20 } };   // 銃id→シートのコマ・握りから銃口までのドット数（_script_sprite.py --report の値）
+const GUN_PIVOT = { x: 10, y: 19 };                                                                          // 銃のコマ内の握りの位置（--anchor-at）
 function whiteMask(im) { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const x = c.getContext('2d'); x.drawImage(im, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height); return c; }   // 被弾・予兆の白点滅用（同じ形の白いシルエット）
-function loadSprites() { for (const k in IMG_FILES) { const im = new Image(); im.onload = () => { IMG[k] = { im, w: im.width, h: im.height, white: whiteMask(im) }; }; im.onerror = () => { IMG[k] = null; }; im.src = IMG_FILES[k] + '?v=' + VERSION; } }
-function drawSprite(k, x, y, faceLeft, white, alpha) {
+function loadSprites() { for (const k in IMG_FILES) { const [f, cell] = IMG_FILES[k]; const im = new Image(); im.onload = () => { IMG[k] = { im, cell, n: Math.max(1, Math.round(im.width / cell)), h: im.height, white: whiteMask(im) }; }; im.onerror = () => { IMG[k] = null; }; im.src = f + '?v=' + VERSION; } }
+// k＝画像名／frame＝コマ番号／sx,sy＝伸び縮み／rot＝回転（ラジアン・倒れ用）
+function drawSprite(k, x, y, faceLeft, white, alpha, frame, sx, sy, rot) {
   const s = TUNE.sprite.on && IMG[k]; if (!s) return false;
-  const sc = TUNE.sprite.scale, w = s.w * sc, h = s.h * sc;
+  const sc = TUNE.sprite.scale, c = s.cell, w = c * sc, h = s.h * sc, fr = ((frame || 0) % s.n + s.n) % s.n;
   ctx.save(); ctx.imageSmoothingEnabled = false; if (alpha !== undefined) ctx.globalAlpha = alpha;
-  ctx.translate(x, y); if (faceLeft) ctx.scale(-1, 1);
-  ctx.drawImage(white ? s.white : s.im, -w / 2, -h / 2, w, h);
+  ctx.translate(x, y); if (rot) ctx.rotate(rot); if (faceLeft) ctx.scale(-1, 1); if (sx || sy) ctx.scale(sx || 1, sy || 1);
+  ctx.drawImage(white ? s.white : s.im, fr * c, 0, c, s.h, -w / 2, -h / 2, w, h);
   ctx.restore(); return true;
+}
+// 銃＝体の手の位置（TUNE.sprite.hand）を軸に ang へ回す。左向きは上下反転して逆さにならないようにする。戻り値＝銃口の位置（無ければ null）
+function drawGun(x, y, ang, faceLeft, gun) {
+  const s = TUNE.sprite.on && IMG.guns, gi = gun && GUNIMG[gun.id]; if (!s || !gi) return null;
+  const sc = TUNE.sprite.scale, hx = TUNE.sprite.hand.x * sc * (faceLeft ? -1 : 1), hy = TUNE.sprite.hand.y * sc, c = s.cell;
+  ctx.save(); ctx.imageSmoothingEnabled = false; ctx.translate(x + hx, y + hy); ctx.rotate(ang); if (faceLeft) ctx.scale(1, -1);
+  ctx.drawImage(s.im, gi.fr * c, 0, c, c, -GUN_PIVOT.x * sc, -GUN_PIVOT.y * sc, c * sc, c * sc);
+  ctx.restore();
+  return { x: x + hx + Math.cos(ang) * gi.mz * sc, y: y + hy + Math.sin(ang) * gi.mz * sc };
+}
+function gunMuzzle(gun) { const s = TUNE.sprite.on && IMG.guns, gi = gun && GUNIMG[gun.id]; if (!s || !gi) return null; const fl = !!player.fl, sc = TUNE.sprite.scale; const hx = TUNE.sprite.hand.x * sc * (fl ? -1 : 1), hy = TUNE.sprite.hand.y * sc; return { x: player.x + hx + Math.cos(player.ang) * gi.mz * sc, y: player.y + hy + Math.sin(player.ang) * gi.mz * sc }; }
+// 走りのコマ送り（主人公）＝動いている間だけ進む。接地のコマ（0・2）に変わった瞬間に足元へ砂煙
+function animStep(dt) {
+  if (player.moving && player.alive) {
+    const prev = player.animFr | 0;
+    player.animT = (player.animT || 0) + dt * TUNE.sprite.runFps * (player.spd / TUNE.player.spd);
+    player.animFr = Math.floor(player.animT) % 4;
+    if (TUNE.sprite.dust && player.animFr !== prev && (player.animFr === 0 || player.animFr === 2) && IMG.heroRun) {
+      const sc = TUNE.sprite.scale, dir = player.fl ? 1 : -1;
+      parts.push({ x: player.x + dir * 6 * sc, y: player.y + 21 * sc, vx: dir * 18, vy: -8, life: 0.28, max: 0.28, col: '#5d6f95', size: 3 });
+    }
+  } else { player.animT = 0; player.animFr = 0; }
 }
 function faceLeft(o, ang) { const c = Math.cos(ang); if (c < -TUNE.sprite.faceHys) o.fl = true; else if (c > TUNE.sprite.faceHys) o.fl = false; return !!o.fl; }   // 真上・真下を向いている間は直前の向きを保つ（ちらつき防止）
 function drawShadow(x, y, rx, ry) { ctx.fillStyle = '#000'; ctx.globalAlpha = TUNE.sprite.shadow; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }   // 足元の影＝絵には描かない（プロンプトで禁止）のでゲーム側で置く
@@ -741,7 +771,7 @@ function fireBullet(a) { bullets.push({ x: player.x + Math.cos(a) * 14, y: playe
 function fireVolley() {   // 1トリガー分＝銃の同時弾数（＋多銃身）を拡散の扇に並べる。単発は拡散ぶんだけ散る
   const g = G.gun, n = g.n + D.multi, sp = g.spread * D.spread, fan = n > 1 ? Math.max(sp, 0.14 * (n - 1) * D.spread) : 0;   // 安定化アーム＝拡散（扇の幅・ばらつき）を縮める
   for (let i = 0; i < n; i++) { const a = player.ang + (n > 1 ? (i - (n - 1) / 2) * fan / (n - 1) : 0) + (Math.random() - 0.5) * (n > 1 ? 0.04 * D.spread : sp); fireBullet(a); }
-  SFX.shot(); const a0 = player.ang; parts.push({ x: player.x + Math.cos(a0) * 16, y: player.y + Math.sin(a0) * 16, vx: 0, vy: 0, life: 0.05, max: 0.05, col: COL.white, size: n > 1 ? 8 : 5 });
+  SFX.shot(); const a0 = player.ang, mzp = gunMuzzle(G.gun) || { x: player.x + Math.cos(a0) * 16, y: player.y + Math.sin(a0) * 16 }; parts.push({ x: mzp.x, y: mzp.y, vx: 0, vy: 0, life: 0.05, max: 0.05, col: COL.white, size: n > 1 ? 8 : 5 });   // 銃口の光＝銃の絵の先端（Phase 5-1）
 }
 function update(dt) {
   G.time += dt; readInput();
@@ -962,6 +992,7 @@ function updateEnemy(e, dt) {
   if (e.type === 'boss') { updateBoss(e, dt, dx, dy, d); return; }
   if (e.st === 'chase' || e.st === 'move') { e.stuckT += dt; if (e.stuckT >= 1.5) { if (Math.hypot(e.x - e.sx, e.y - e.sy) < 6) { e.nudge = Math.random() * Math.PI * 2; e.nudgeT = 0.5; } e.sx = e.x; e.sy = e.y; e.stuckT = 0; } }
   if (e.type === 'rusher') {
+    if (e.st === 'chase' || e.st === 'dash') { e.animT = (e.animT || 0) + dt * (e.st === 'dash' ? TUNE.sprite.dashFps : TUNE.sprite.rusherFps); e.animFr = Math.floor(e.animT) % 4; }   // Phase 5-1: 走りのコマ送り
     switch (e.st) {
       case 'spawn': e.t -= dt; if (e.t <= 0) { e.st = 'chase'; } break;
       case 'chase': if (d < TUNE.rusher.tellDist && see()) { e.st = 'tell'; e.t = TUNE.rusher.tellT * D.tellK; SFX.tell(); } else walkTo(e, dt, TUNE.rusher.spd, true, dx, dy, d); break;   // 予兆×先読み回路
@@ -1068,13 +1099,16 @@ function drawEnemy(e) {
   if (e.type === 'rusher') {
     // Phase 5-0: 突進型＝画像（右向きの絵・左へ向く時は反転）。残像も同じ絵。画像が無ければ従来の三角形
     const fl = faceLeft(e, e.face), hasImg = TUNE.sprite.on && !!IMG.rusher;
+    // Phase 5-1: 追跡・突進＝走り4コマ（rusherRun）／予兆＝沈み込み／突進＝伸び（手続き型）。それ以外は1コマ
+    const run = !!IMG.rusherRun && (e.st === 'chase' || e.st === 'dash'), key = run ? 'rusherRun' : 'rusher', fr = run ? (e.animFr | 0) : 0;
+    let sx = 1, sy = 1; if (e.st === 'dash') { sx = 1.25; sy = 0.85; } else if (e.st === 'tell') { sx = 1.08; sy = 0.86; }
     if (e.st === 'dash') {
-      if (!drawSprite('rusher', e.x - e.dx * 14, e.y - e.dy * 14, fl, false, 0.25)) { ctx.globalAlpha = 0.25; ctx.fillStyle = col; tri(e.x - e.dx * 14, e.y - e.dy * 14, e.r, e.face); ctx.fill(); }
-      if (!drawSprite('rusher', e.x - e.dx * 28, e.y - e.dy * 28, fl, false, 0.12)) { ctx.globalAlpha = 0.12; ctx.fillStyle = col; tri(e.x - e.dx * 28, e.y - e.dy * 28, e.r, e.face); ctx.fill(); }
+      if (!drawSprite(key, e.x - e.dx * 14, e.y - e.dy * 14, fl, false, 0.25, fr, sx, sy)) { ctx.globalAlpha = 0.25; ctx.fillStyle = col; tri(e.x - e.dx * 14, e.y - e.dy * 14, e.r, e.face); ctx.fill(); }
+      if (!drawSprite(key, e.x - e.dx * 28, e.y - e.dy * 28, fl, false, 0.12, fr, sx, sy)) { ctx.globalAlpha = 0.12; ctx.fillStyle = col; tri(e.x - e.dx * 28, e.y - e.dy * 28, e.r, e.face); ctx.fill(); }
       ctx.globalAlpha = 1;
     }
     if (hasImg) drawShadow(e.x, e.y + 11 * TUNE.sprite.scale, 18 * TUNE.sprite.scale, 4 * TUNE.sprite.scale);
-    if (!drawSprite('rusher', e.x, e.y, fl, flash)) { ctx.fillStyle = flash ? COL.white : col; tri(e.x, e.y, e.r + 2, e.face); ctx.fill(); }
+    if (!drawSprite(key, e.x, e.y, fl, flash, undefined, fr, sx, sy)) { ctx.fillStyle = flash ? COL.white : col; tri(e.x, e.y, e.r + 2, e.face); ctx.fill(); }
   } else { ctx.fillStyle = flash ? COL.white : col; dia(e.x, e.y, e.r + 1); ctx.fill(); ctx.fillStyle = '#0b0f1a'; dia(e.x, e.y, 4); ctx.fill(); }
   if (e.st === 'tell') { ctx.fillStyle = COL.white; ctx.font = '700 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 6); }
   if (e.hp < e.maxHp) { ctx.fillStyle = '#000'; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24, 3); ctx.fillStyle = col; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24 * e.hp / e.maxHp, 3); }
@@ -1103,16 +1137,28 @@ function drawBoss(e) {
   if (tell) { ctx.fillStyle = COL.white; ctx.font = '700 18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 10); }
 }
 function drawPlayer() {
-  if (!player.alive || G.mode === 'title') return;
+  if (G.mode === 'title') return;
+  const sc = TUNE.sprite.scale, hasImg = TUNE.sprite.on && !!IMG.hero;
+  if (!player.alive) {   // Phase 5-1: 死亡＝倒れた絵（'dead' の間だけ・向いていた方と逆へ倒れる）
+    if (hasImg && G.mode === 'dead') { const fl = !!player.fl; drawShadow(player.x, player.y + 10 * sc, 20 * sc, 4 * sc); drawSprite('hero', player.x, player.y + 8 * sc, fl, false, 0.9, 0, 1, 1, (fl ? 1 : -1) * Math.PI / 2); }
+    return;
+  }
   if (player.inv > 0 && Math.floor(player.inv * 12) % 2 === 0) return;
   if (G.aim) { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([5, 7]); ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(G.aim.x, G.aim.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(G.aim.x, G.aim.y, G.aim.r + 6, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
-  // Phase 5-0: 主人公＝画像（体は左右2方向＝右向きの絵を反転／銃＝照準線だけ360°回る）。画像が無ければ従来の円
-  const sc = TUNE.sprite.scale, hasImg = TUNE.sprite.on && !!IMG.hero;
+  // Phase 5-0/5-1: 主人公＝画像（体は左右2方向＝右向きの絵を反転／銃＝別画像で360°回る）。画像が無ければ従来の円＋白い線
+  const fl = faceLeft(player, player.ang);
   if (hasImg) drawShadow(player.x, player.y + 22 * sc, 9 * sc, 3 * sc);
   else { ctx.globalAlpha = 0.18; ctx.fillStyle = COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 6, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
-  if (!drawSprite('hero', player.x, player.y, faceLeft(player, player.ang), player.flash > 0)) { ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill(); }
-  const g0 = hasImg ? 8 : 6, g1 = hasImg ? 24 : 18;   // 銃（照準線）＝絵の体からはみ出す長さ
-  ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * g0, player.y + Math.sin(player.ang) * g0); ctx.lineTo(player.x + Math.cos(player.ang) * g1, player.y + Math.sin(player.ang) * g1); ctx.stroke();
+  // 走り＝4コマ（通過のコマは1ドット浮く）／待機＝呼吸の弾み／ダッシュ＝進行方向へ伸びる（手続き型）
+  let key = 'hero', fr = 0, dy = 0, sx = 1, sy = 1;
+  if (player.moving && IMG.heroRun) { key = 'heroRun'; fr = player.animFr | 0; if (fr === 1 || fr === 3) dy = -sc; }
+  else if (TUNE.sprite.idleBob) { dy = (Math.floor(G.time * 1.6) % 2) ? -TUNE.sprite.idleBob * sc : 0; }
+  if (player.dashT > 0) { const ax = Math.abs(player.ddx) >= Math.abs(player.ddy); sx = ax ? 1.3 : 0.85; sy = ax ? 0.85 : 1.3; }
+  if (!drawSprite(key, player.x, player.y + dy, fl, player.flash > 0, undefined, fr, sx, sy)) { ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill(); }
+  if (!drawGun(player.x, player.y + dy, player.ang, fl, G.gun)) {   // 銃の絵が無ければ従来の白い線
+    const g0 = hasImg ? 8 : 6, g1 = hasImg ? 24 : 18;
+    ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * g0, player.y + Math.sin(player.ang) * g0); ctx.lineTo(player.x + Math.cos(player.ang) * g1, player.y + Math.sin(player.ang) * g1); ctx.stroke();
+  }
   if (!player.moving && G.mode === 'run') { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
   if (player.dashCool > 0 && player.dashT <= 0) { const k = 1 - player.dashCool / (TUNE.dash.t + D.dashCool); ctx.strokeStyle = COL.white; ctx.globalAlpha = 0.45; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 8, -Math.PI / 2, -Math.PI / 2 + 6.2832 * k); ctx.stroke(); ctx.globalAlpha = 1; }   // ダッシュ再使用までのリング
 }
@@ -1217,7 +1263,7 @@ function drawOverlays() {
     centerText('死ぬと品だけ失う。スクラップ・義体・銃・型は残る', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('フロアの出口で「帰る／進む」を選べる', y + 66, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　売上 Cr ' + S.earned, y + 90, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText(VERSION + '  Phase 5-0 画像の実測（主人公・突進型＝Gemini生成ドット絵）＋3c-1 ビルドの骨', y + 110, '500 11px Menlo, monospace', COL.mut);
+    centerText(VERSION + '  Phase 5-1 キャラの動き（走り4コマ・銃の絵・手続き型）＋3c-1 ビルドの骨', y + 110, '500 11px Menlo, monospace', COL.mut);
   } else if (G.mode === 'pause') {
     overlay(0.7); centerText('一時停止', cy - 190, '700 26px -apple-system, "Hiragino Sans", sans-serif');
     let y = cy - 150;
@@ -1452,15 +1498,16 @@ let last = performance.now();
 function frame(t) {
   requestAnimationFrame(frame); const t0 = performance.now(); let dt = (t - last) / 1000; last = t; if (dt > 0.05) dt = 0.05; if (dt < 0) dt = 0;
   if (G.mode === 'run') update(dt); else if (G.mode === 'home') updateHome(dt); else if (G.mode === 'shop') updateShop(dt); else if (G.mode === 'dead' || G.mode === 'floorclear' || G.mode === 'win') updateFx(dt);
+  if (G.mode === 'run' || G.mode === 'home') animStep(dt);   // Phase 5-1: 走りのコマ送り・砂煙
   draw(); meter(performance.now() - t0, dt); if ((M.js.length % 30) === 0) relayoutIfChanged();
 }
 
 // ---------- デバッグ用フック（PC確認用・ゲームには影響しない）----------
 const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, get S() { return S; }, M, D, newRun, nextFloor, resumeRun, loadRun, saveRun, clearRun, genFloor, god: false, forced: null,
   setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { while (enemies.length) killEnemy(enemies.length - 1); },
-  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else if (G.mode === 'home') updateHome(1 / 60); else if (G.mode === 'shop') updateShop(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom,
+  step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else if (G.mode === 'home') updateHome(1 / 60); else if (G.mode === 'shop') updateShop(1 / 60); else updateFx(1 / 60); if (G.mode === 'run' || G.mode === 'home') animStep(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom,
   GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; },
-  SKILLS, SLOTS, GEAR, GEARM, FRAMES, FRAME, lv, permLv, patchLv, canPatch, computePerm, bagCap, craftGear, equipGear, forgeGun, awardMold, roomGoods, treasureGoods, bossGoods, exitInfo, missingFor, permList, migrateS, spawnEnemies, IMG, IMG_FILES, loadSprites, drawSprite };
+  SKILLS, SLOTS, GEAR, GEARM, FRAMES, FRAME, lv, permLv, patchLv, canPatch, computePerm, bagCap, craftGear, equipGear, forgeGun, awardMold, roomGoods, treasureGoods, bossGoods, exitInfo, missingFor, permList, migrateS, spawnEnemies, IMG, IMG_FILES, loadSprites, drawSprite, drawGun, gunMuzzle, animStep, GUNIMG };
 
 // ---------- 起動 ----------
 layout(); loadSprites();
