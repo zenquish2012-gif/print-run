@@ -38,7 +38,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p52-0.1.0';
+const VERSION = 'p53-0.1.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -49,7 +49,7 @@ const OPP = { N: 'S', S: 'N', W: 'E', E: 'W' };
 const TUNE = {
   player:  { hp: 5, spd: 175, fireRate: 0.14, bulletSpd: 700, range: 300, inv: 0.9, stopFire: 0 }, // 速さ／連射間隔(秒)／弾速／射程／被弾後の無敵(秒)／止まってから初弾までの待ち(秒)
   dash:    { spd: 640, t: 0.16, cool: 0.5, inv: true, tapT: 0.18, tapMove: 14, flickV: 350, flickDist: 20, flickWin: 120, flickGap: 120 }, // ダッシュ: 速度／時間(秒)／再使用まで(秒)／無敵か／タップ判定=触れてから離すまで(秒)・指の移動(px)／フリック判定=離す直前 flickWin ms の移動が flickDist px 以上かつ flickV px/秒以上（指を止めて flickGap ms 以上たって離したら不成立）。p1-0.2.2 で確定（2026-09-11 マスター「ダッシュ良い感じです」）
-  ui:      { fallbackSat: 59, fallbackSab: 34 },                                                  // ホーム画面版で safe-area が 0 と読めた時の保険（Phase 0 の iPhone 15 実測値）
+  ui:      { fallbackSat: 59, fallbackSab: 34, font: 1.3 },                                       // ホーム画面版で safe-area が 0 と読めた時の保険（Phase 0 の iPhone 15 実測値）／font＝文字の倍率（p53・マスター「全体的に文字を大きく」＝1.0 が p52 までの大きさ。行間・枠も FS() で追従・計器と版表示は除外）
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
   shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1, nearMax: 0.6 }, // 射撃型: 近すぎ→下がる（nearMax 秒以上続いたら至近で撃つ）／狙い(秒)／照準ロック(残り秒)／弾速／再装填
   room:    { bonusFrom: 3, spawnDist: 170 },                                                      // 3部屋目以降は敵+1／主人公からの最短出現距離
@@ -324,10 +324,19 @@ function readSafe() {
   if (isStandalone()) { if (sat < 20) sat = TUNE.ui.fallbackSat; if (sab < 10) sab = TUNE.ui.fallbackSab; }   // 保険＝読めなくても被らない
   L.sat = sat; L.sab = sab;
 }
+// ---------- 文字（p53）＝大きさは TUNE.ui.font 倍・行間や枠は FS() で追従・長い1行は fit で縮めて収める（縮める下限は p52 までの大きさ） ----------
+const FONT_UI = '-apple-system, "Hiragino Sans", sans-serif', FONT_MONO = 'Menlo, monospace';
+function F(px, w, mono, raw) { const k = raw ? 1 : TUNE.ui.font; return (w || 500) + ' ' + (Math.round(px * k * 10) / 10) + 'px ' + (mono ? FONT_MONO : FONT_UI); }   // raw＝倍率を掛けない（計器・版表示）
+function FS(n) { return Math.round(n * TUNE.ui.font); }   // 行間・余白・小さな枠を文字に追従させる
+function fitFont(font, text, maxW) {   // 1行が maxW に収まるまで文字を縮める（下限＝倍率1.0の大きさ＝p52 までと同じ）
+  if (!maxW) return font; ctx.font = font; const w = ctx.measureText(text).width; if (w <= maxW) return font;
+  const m = /(\d+(?:\.\d+)?)px/.exec(font); if (!m) return font; const px = parseFloat(m[1]), px2 = Math.max(px / TUNE.ui.font, px * maxW / w);
+  return font.replace(m[0], (Math.round(px2 * 10) / 10) + 'px');
+}
 function layout() {
   readSafe(); L.w = innerWidth; L.h = innerHeight; L.dpr = Math.min(3, devicePixelRatio || 1);
   cv.width = Math.round(L.w * L.dpr); cv.height = Math.round(L.h * L.dpr); ctx.setTransform(L.dpr, 0, 0, L.dpr, 0, 0);
-  L.topH = L.sat + 64; L.botH = L.sab + 84;   // 下帯は部品の列（Phase 2）を足して 70→84
+  L.topH = L.sat + 72; L.botH = L.sab + 92;   // 下帯は部品の列（Phase 2）を足して 70→84。p53＝文字1.3倍に合わせ 64→72／84→92（2行目を右上ボタンの下へ・部品の列の2段目が帯に収まる）
   const ph = Math.max(200, L.h - L.topH - L.botH);
   L.s = Math.min(L.w / RW, ph / RH); L.ox = (L.w - RW * L.s) / 2; L.oy = L.topH + (ph - RH * L.s) / 2;
   renderStatic();
@@ -1086,8 +1095,8 @@ function roomKind(r) {   // 扉の看板・ミニマップに出す「その部�
 }
 function sign(x, y, kind, dim) {   // 扉の看板＝色枠＋1文字
   const k = RK[kind]; if (!k) return;
-  ctx.globalAlpha = dim ? 0.35 : 1; ctx.fillStyle = '#070a12'; ctx.fillRect(x - 11, y - 11, 22, 22); ctx.strokeStyle = k.c; ctx.lineWidth = 2; ctx.strokeRect(x - 10, y - 10, 20, 20);
-  ctx.fillStyle = k.c; ctx.font = '700 14px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(k.ch, x, y + 1); ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+  const b = FS(11); ctx.globalAlpha = dim ? 0.35 : 1; ctx.fillStyle = '#070a12'; ctx.fillRect(x - b, y - b, b * 2, b * 2); ctx.strokeStyle = k.c; ctx.lineWidth = 2; ctx.strokeRect(x - b + 1, y - b + 1, b * 2 - 2, b * 2 - 2);   // p53: 枠も文字に追従
+  ctx.fillStyle = k.c; ctx.font = F(14, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(k.ch, x, y + 1); ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
 }
 function drawDoors() {
   const doors = [];
@@ -1124,7 +1133,7 @@ function drawEnemy(e) {
     if (hasImg) drawShadow(e.x, e.y + 11 * TUNE.sprite.scale, 18 * TUNE.sprite.scale, 4 * TUNE.sprite.scale);
     if (!drawSprite(key, e.x, e.y, fl, flash, undefined, fr, sx, sy)) { ctx.fillStyle = flash ? COL.white : col; tri(e.x, e.y, e.r + 2, e.face); ctx.fill(); }
   } else { ctx.fillStyle = flash ? COL.white : col; dia(e.x, e.y, e.r + 1); ctx.fill(); ctx.fillStyle = '#0b0f1a'; dia(e.x, e.y, 4); ctx.fill(); }
-  if (e.st === 'tell') { ctx.fillStyle = COL.white; ctx.font = '700 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 6); }
+  if (e.st === 'tell') { ctx.fillStyle = COL.white; ctx.font = F(14, 700); ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 6); }
   if (e.hp < e.maxHp) { ctx.fillStyle = '#000'; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24, 3); ctx.fillStyle = col; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24 * e.hp / e.maxHp, 3); }
 }
 function drawBoss(e) {
@@ -1136,7 +1145,7 @@ function drawBoss(e) {
     ctx.save(); ctx.beginPath(); ctx.rect(0, 0, RW, RH); ctx.clip();   // 部屋の外へはみ出さない
     ctx.fillStyle = COL.player; ctx.globalAlpha = tell ? 0.08 + 0.16 * k : 0.10; ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.arc(e.x, e.y, R, a0, a1); ctx.closePath(); ctx.fill();
     ctx.strokeStyle = COL.player; ctx.globalAlpha = tell ? 0.35 + 0.5 * k : 0.3; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x + Math.cos(a0) * R, e.y + Math.sin(a0) * R); ctx.lineTo(e.x, e.y); ctx.lineTo(e.x + Math.cos(a1) * R, e.y + Math.sin(a1) * R); ctx.stroke(); ctx.setLineDash([]);
-    if (tell) { ctx.globalAlpha = 0.5 + 0.5 * k; ctx.fillStyle = COL.player; ctx.font = '700 13px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('SAFE', e.x + Math.cos(e.lane) * 120, e.y + Math.sin(e.lane) * 120 + 5); }
+    if (tell) { ctx.globalAlpha = 0.5 + 0.5 * k; ctx.fillStyle = COL.player; ctx.font = F(13, 700); ctx.textAlign = 'center'; ctx.fillText('SAFE', e.x + Math.cos(e.lane) * 120, e.y + Math.sin(e.lane) * 120 + 5); }
     ctx.restore(); ctx.globalAlpha = 1;
   }
   if (tell && e.pat === 'ring') { ctx.strokeStyle = COL.ebullet; ctx.globalAlpha = 0.25 + 0.5 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 8]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 14 + k * 30, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
@@ -1148,7 +1157,7 @@ function drawBoss(e) {
   ctx.fillStyle = flash ? COL.white : (e.enraged ? '#c8103f' : '#8a1040'); hex(e.x, e.y, e.r, e.face); ctx.fill();
   ctx.strokeStyle = e.enraged ? COL.boss : COL.portal; ctx.lineWidth = 3; hex(e.x, e.y, e.r, e.face); ctx.stroke();
   ctx.fillStyle = COL.player; ctx.beginPath(); ctx.arc(e.x + Math.cos(e.face) * 10, e.y + Math.sin(e.face) * 10, 5, 0, 6.2832); ctx.fill();
-  if (tell) { ctx.fillStyle = COL.white; ctx.font = '700 18px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 10); }
+  if (tell) { ctx.fillStyle = COL.white; ctx.font = F(18, 700); ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 10); }
 }
 // 主人公の弾＝銃ごとの形（GUNFX.shape）。改造で威力>1 なら橙・1px 太く（p51 までの表現を残す）
 function drawPBullet(b) {
@@ -1186,26 +1195,26 @@ function drawPlayer() {
 function drawPickups() {
   for (const p of G.pickups) {
     if (p.kind === 'scrap') { ctx.fillStyle = COL.scrap; dia(p.x, p.y, 5 + Math.sin(p.t * 8) * 1); ctx.fill(); ctx.fillStyle = '#7a5a00'; dia(p.x, p.y, 2); ctx.fill(); continue; }
-    if (p.kind === 'good') { const g = GOOD[p.id]; ctx.fillStyle = '#070a12'; ctx.fillRect(p.x - 9, p.y - 9, 18, 18); ctx.strokeStyle = g.col; ctx.lineWidth = 2; ctx.strokeRect(p.x - 8, p.y - 8, 16, 16); ctx.fillStyle = g.col; ctx.font = '700 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(g.ch, p.x, p.y + 1); ctx.textBaseline = 'alphabetic'; continue; }
+    if (p.kind === 'good') { const g = GOOD[p.id]; ctx.fillStyle = '#070a12'; ctx.fillRect(p.x - 9, p.y - 9, 18, 18); ctx.strokeStyle = g.col; ctx.lineWidth = 2; ctx.strokeRect(p.x - 8, p.y - 8, 16, 16); ctx.fillStyle = g.col; ctx.font = F(11, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(g.ch, p.x, p.y + 1); ctx.textBaseline = 'alphabetic'; continue; }
     const k = RK[p.rk]; ctx.strokeStyle = k.c; ctx.lineWidth = 2; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(p.t * 5); ctx.beginPath(); ctx.arc(p.x, p.y, 18 + Math.sin(p.t * 5) * 2, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
     sign(p.x, p.y, p.rk, false);
-    ctx.fillStyle = k.c; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(k.label + (p.rk === 'scrap' ? ' +' + (TUNE.loot.scrapReward + TUNE.loot.scrapPerFloor * G.floorIdx) : p.rk === 'heal' ? ' +' + TUNE.loot.heal : ''), p.x, p.y + 34);
+    ctx.fillStyle = k.c; ctx.font = F(11, 600); ctx.textAlign = 'center'; ctx.fillText(k.label + (p.rk === 'scrap' ? ' +' + (TUNE.loot.scrapReward + TUNE.loot.scrapPerFloor * G.floorIdx) : p.rk === 'heal' ? ' +' + TUNE.loot.heal : ''), p.x, p.y + 34);
   }
   for (const ped of G.peds) {
     if (ped.home) {   // 拠点の台座＝色枠＋1文字＋名前
       const h = ped.home; ctx.fillStyle = '#1b2a4a'; ctx.beginPath(); ctx.arc(ped.x, ped.y, 19, 0, 6.2832); ctx.fill(); ctx.strokeStyle = h.col; ctx.lineWidth = 2; ctx.globalAlpha = 0.55 + 0.35 * Math.sin(ped.t * 3); ctx.beginPath(); ctx.arc(ped.x, ped.y, 23, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
-      ctx.fillStyle = '#070a12'; ctx.fillRect(ped.x - 11, ped.y - 11, 22, 22); ctx.strokeStyle = h.col; ctx.strokeRect(ped.x - 10, ped.y - 10, 20, 20); ctx.fillStyle = h.col; ctx.font = '700 14px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(h.ch, ped.x, ped.y + 1); ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = COL.text; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(h.label, ped.x, ped.y + 38);
-      if (h.kind === 'launch' && G.saved) { ctx.fillStyle = COL.player; ctx.font = '500 10px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('続きあり', ped.x, ped.y + 51); }
-      if (h.kind === 'store') { ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace'; ctx.fillText('品 ' + wareCount() + '  ◆' + S.scrapBank, ped.x, ped.y + 51); }
+      { const b = FS(11); ctx.fillStyle = '#070a12'; ctx.fillRect(ped.x - b, ped.y - b, b * 2, b * 2); ctx.strokeStyle = h.col; ctx.strokeRect(ped.x - b + 1, ped.y - b + 1, b * 2 - 2, b * 2 - 2); } ctx.fillStyle = h.col; ctx.font = F(14, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(h.ch, ped.x, ped.y + 1); ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = COL.text; ctx.font = F(11, 600); ctx.fillText(h.label, ped.x, ped.y + FS(31) + 1);
+      if (h.kind === 'launch' && G.saved) { ctx.fillStyle = COL.player; ctx.font = F(10, 500); ctx.fillText('続きあり', ped.x, ped.y + FS(44)); }
+      if (h.kind === 'store') { ctx.fillStyle = COL.mut; ctx.font = F(10, 500, true); ctx.fillText('品 ' + wareCount() + '  ◆' + S.scrapBank, ped.x, ped.y + FS(44)); }
       continue;
     }
     ctx.fillStyle = '#1b2a4a'; ctx.beginPath(); ctx.arc(ped.x, ped.y, 17, 0, 6.2832); ctx.fill(); ctx.strokeStyle = ped.kind === 'treasure' ? COL.treasure : COL.shop; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(ped.t * 4); ctx.beginPath(); ctx.arc(ped.x, ped.y, 20, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
-    if (ped.kind === 'treasure') { sign(ped.x, ped.y, 'treasure', false); ctx.fillStyle = COL.treasure; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('3つから1つ選ぶ', ped.x, ped.y + 36); }
+    if (ped.kind === 'treasure') { sign(ped.x, ped.y, 'treasure', false); ctx.fillStyle = COL.treasure; ctx.font = F(11, 600); ctx.textAlign = 'center'; ctx.fillText('3つから1つ選ぶ', ped.x, ped.y + FS(30)); }
     else { const it = ped.item, fam = it.kind === 'heal' ? 'heal' : PART[it.id].fam; sign(ped.x, ped.y, fam, false);
-      ctx.fillStyle = COL.text; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(itemName(it), ped.x, ped.y + 36);
+      ctx.fillStyle = COL.text; ctx.font = F(11, 600); ctx.textAlign = 'center'; ctx.fillText(itemName(it), ped.x, ped.y + FS(30));
       const maxed = it.kind === 'part' && !canPatch(it.id);
-      ctx.fillStyle = maxed ? COL.mut : G.scrap >= it.price ? COL.scrap : COL.mut; ctx.font = '700 12px Menlo, monospace'; ctx.fillText(maxed ? 'MAX' : '◆' + it.price, ped.x, ped.y + 50); }
+      ctx.fillStyle = maxed ? COL.mut : G.scrap >= it.price ? COL.scrap : COL.mut; ctx.font = F(12, 700, true); ctx.fillText(maxed ? 'MAX' : '◆' + it.price, ped.x, ped.y + FS(43)); }
   }
 }
 function drawWorld() {
@@ -1214,14 +1223,14 @@ function drawWorld() {
   ctx.drawImage(stat, L.ox + sx, L.oy + sy, RW * L.s, RH * L.s);
   ctx.translate(L.ox + sx, L.oy + sy); ctx.scale(L.s, L.s);
   drawDoors();
-  if (G.home) { ctx.fillStyle = COL.mut; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('輪転機', RW / 2, TILE * 9 + 4); ctx.fillStyle = COL.portal; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(G.time * 2); ctx.beginPath(); ctx.arc(RW / 2, TILE * 9, 8 + Math.sin(G.time * 2) * 2, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
-  if (G.portal) { const t = G.portal.t; ctx.strokeStyle = COL.portal; ctx.lineWidth = 3; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 18 + Math.sin(t * 4) * 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 30 + Math.sin(t * 4 + 1) * 4, t, t + 4); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = COL.portal; ctx.font = '600 10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.portal.end ? 'END' : 'NEXT FLOOR', G.portal.x, G.portal.y + 48); }
+  if (G.home) { ctx.fillStyle = COL.mut; ctx.font = F(11, 600); ctx.textAlign = 'center'; ctx.fillText('輪転機', RW / 2, TILE * 9 + 4); ctx.fillStyle = COL.portal; ctx.globalAlpha = 0.5 + 0.3 * Math.sin(G.time * 2); ctx.beginPath(); ctx.arc(RW / 2, TILE * 9, 8 + Math.sin(G.time * 2) * 2, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
+  if (G.portal) { const t = G.portal.t; ctx.strokeStyle = COL.portal; ctx.lineWidth = 3; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 18 + Math.sin(t * 4) * 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(G.portal.x, G.portal.y, 30 + Math.sin(t * 4 + 1) * 4, t, t + 4); ctx.stroke(); ctx.globalAlpha = 1; ctx.fillStyle = COL.portal; ctx.font = F(10, 600); ctx.textAlign = 'center'; ctx.fillText(G.portal.end ? 'END' : 'NEXT FLOOR', G.portal.x, G.portal.y + 48); }
   drawPickups();
   for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.col; ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size); } ctx.globalAlpha = 1;
   for (const e of enemies) drawEnemy(e);
   for (const b of bullets) { if (b.from === 'p') { drawPBullet(b); } else { ctx.fillStyle = COL.ebullet; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.2832); ctx.fill(); ctx.fillStyle = '#7a4a00'; ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, 6.2832); ctx.fill(); } }
   drawPlayer();
-  for (const f of G.floats) { ctx.globalAlpha = Math.max(0, Math.min(1, f.t / 0.4)); ctx.fillStyle = f.col; ctx.font = '700 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(f.text, f.x, f.y); } ctx.globalAlpha = 1;
+  for (const f of G.floats) { ctx.globalAlpha = Math.max(0, Math.min(1, f.t / 0.4)); ctx.fillStyle = f.col; ctx.font = F(12, 700); ctx.textAlign = 'center'; ctx.fillText(f.text, f.x, f.y); } ctx.globalAlpha = 1;
   if (G.boss && G.boss.st !== 'spawn') { const w = RW - 60, x = 30, y = 10; ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x, y, w, 8); ctx.fillStyle = G.boss.enraged ? COL.boss : COL.portal; ctx.fillRect(x, y, w * Math.max(0, G.boss.hp / G.boss.maxHp), 8); ctx.strokeStyle = COL.white; ctx.lineWidth = 1; ctx.globalAlpha = 0.5; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, 7); ctx.globalAlpha = 1; }
   ctx.restore();
 }
@@ -1230,15 +1239,15 @@ function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return m
 const SCREEN_MODES = ['shop', 'forge', 'forgeSlot', 'store', 'talk', 'launch', 'swap', 'data'];   // 拠点の各画面＝上下の帯（HUD）を描かない（重なって読みにくい）
 function drawHUD() {
   layoutButtons();
-  if (SCREEN_MODES.includes(G.mode)) { ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace'; ctx.textAlign = 'left'; ctx.fillText(VERSION, 14, L.h - L.sab - 5); return; }
+  if (SCREEN_MODES.includes(G.mode)) { ctx.fillStyle = COL.mut; ctx.font = F(10, 500, true, true); ctx.textAlign = 'left'; ctx.fillText(VERSION, 14, L.h - L.sab - 5); return; }
   // 上帯＝HP・スクラップ／フロア・部屋・撃破・時間
   ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, 0, L.w, L.topH);
   for (let i = 0; i < player.maxHp; i++) { const x = 14 + i * 20, y = L.sat + 16; ctx.fillStyle = i < player.hp ? COL.hp : '#2a3350'; dia(x + 7, y + 7, 7); ctx.fill(); }
-  const sxp = 14 + player.maxHp * 20 + 10; ctx.fillStyle = COL.scrap; dia(sxp + 6, L.sat + 23, 6); ctx.fill(); ctx.font = '700 13px Menlo, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(String(G.scrap), sxp + 16, L.sat + 28);
-  ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left';
-  if (G.floor) ctx.fillText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '   ROOM ' + G.roomsVisited + '/' + G.floor.n + '   KILL ' + G.kills + '   袋 ' + G.bag.length + '/' + G.bagMax + '   ' + fmt(G.time), 14, L.sat + 52);
-  if (G.home && G.mode !== 'title') { ctx.fillStyle = COL.scrap; ctx.font = '700 13px Menlo, monospace'; ctx.fillText('Cr ' + S.money, sxp + 40, L.sat + 28); ctx.fillStyle = COL.text; ctx.font = '600 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('印刷所   DAY ' + S.day + '   袋 ' + bagCap() + '   銃 ' + (GUN[S.gun] || GUNS[0]).name + (S.gunLv[S.gun] ? '+1' : '') + '   台座に乗ると開く', 14, L.sat + 52); }
-  for (const [b, label] of [[BTN.sound, S.sound ? '♪' : '✕'], [BTN.pause, G.mode === 'pause' ? '▶' : G.home ? '≡' : '❚❚']]) { ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1); ctx.fillStyle = COL.text; ctx.font = '600 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(label, b.x + b.w / 2, b.y + 25); }
+  const sxp = 14 + player.maxHp * 20 + 10; ctx.fillStyle = COL.scrap; dia(sxp + 6, L.sat + 23, 6); ctx.fill(); ctx.font = F(13, 700, true); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(String(G.scrap), sxp + 16, L.sat + 28);
+  ctx.fillStyle = COL.text; ctx.font = F(12, 600); ctx.textAlign = 'left';
+  if (G.floor) { const t = (G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '  ROOM ' + G.roomsVisited + '/' + G.floor.n + '  KILL ' + G.kills + '  袋 ' + G.bag.length + '/' + G.bagMax + '  ' + fmt(G.time); ctx.font = fitFont(ctx.font, t, L.w - 28); ctx.fillText(t, 14, L.sat + 60); }   // p53: 2行目は右上ボタンの下（sat+52→60）・幅に収める
+  if (G.home && G.mode !== 'title') { ctx.fillStyle = COL.scrap; ctx.font = F(13, 700, true); ctx.fillText('Cr ' + S.money, sxp + 40, L.sat + 28); ctx.fillStyle = COL.text; ctx.font = F(12, 600); const t = '印刷所  DAY ' + S.day + '  袋 ' + bagCap() + '  銃 ' + (GUN[S.gun] || GUNS[0]).name + (S.gunLv[S.gun] ? '+1' : '') + '  台座に乗ると開く'; ctx.font = fitFont(ctx.font, t, L.w - 28); ctx.fillText(t, 14, L.sat + 60); }
+  for (const [b, label] of [[BTN.sound, S.sound ? '♪' : '✕'], [BTN.pause, G.mode === 'pause' ? '▶' : G.home ? '≡' : '❚❚']]) { ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(b.x, b.y, b.w, b.h); ctx.strokeStyle = '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1); ctx.fillStyle = COL.text; ctx.font = F(15, 600); ctx.textAlign = 'center'; ctx.fillText(label, b.x + b.w / 2, b.y + 25); }
   // 下帯＝部品の列／計器／ミニマップ
   ctx.fillStyle = 'rgba(11,15,26,0.85)'; ctx.fillRect(0, L.h - L.botH, L.w, L.botH);
   if (G.floor) { const cs = 11, gap = 3, size = GRID * cs + (GRID - 1) * gap, mx = L.w - 14 - size, my = L.h - L.sab - 10 - size;
@@ -1248,24 +1257,24 @@ function drawHUD() {
       ctx.fillRect(x, y, cs, cs);
       if (!r.visited) { ctx.strokeStyle = kc || (kind ? RK[kind].c : '#3a5590'); ctx.lineWidth = 1; ctx.globalAlpha = kc ? 1 : 0.7; ctx.strokeRect(x + 0.5, y + 0.5, cs - 1, cs - 1); ctx.globalAlpha = 1; }
       if (r.visited && r !== G.room && kc) { ctx.fillStyle = '#0b0f1a'; ctx.fillRect(x + 4, y + 4, 3, 3); } }
-    ctx.fillStyle = COL.mut; ctx.font = '500 9px sans-serif'; ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4);
+    ctx.fillStyle = COL.mut; ctx.font = F(9, 500); ctx.textAlign = 'right'; ctx.fillText('MAP', mx + size, my - 4);
     // スキルの列（合計Lv＝恒久＋パッチ。恒久だけのものは薄く・パッチが乗ったものは濃く）
-    let px = 14, py = L.h - L.sab - 60; const pxMax = L.w - 14 - size - 40;
-    for (const p of SKILLS) { const n = lv(p.id); if (!n) continue; if (px > pxMax) { px = 14; py -= 21; } const hot = patchLv(p.id) > 0; ctx.globalAlpha = hot ? 1 : 0.55; ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(px, py, 34, 18); ctx.strokeStyle = RK[p.fam].c; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, 33, 17); ctx.fillStyle = RK[p.fam].c; ctx.font = '700 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.short + (n > 1 ? '×' + n : ''), px + 5, py + 13); ctx.globalAlpha = 1; px += 38; }
+    const cw = FS(34), ch = FS(18); let px = 14, py = L.h - L.sab - 44 - ch; const pxMax = L.w - 14 - size - 40 - (cw - 34);   // p53: チップの大きさも追従（34×18→FS）・計器行の上に置く
+    for (const p of SKILLS) { const n = lv(p.id); if (!n) continue; if (px > pxMax) { px = 14; py -= ch + 4; } const hot = patchLv(p.id) > 0; ctx.globalAlpha = hot ? 1 : 0.55; ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(px, py, cw, ch); ctx.strokeStyle = RK[p.fam].c; ctx.lineWidth = 1; ctx.strokeRect(px + 0.5, py + 0.5, cw - 1, ch - 1); ctx.fillStyle = RK[p.fam].c; ctx.font = F(11, 700); ctx.textAlign = 'left'; ctx.fillText(p.short + (n > 1 ? '×' + n : ''), px + FS(5), py + FS(13)); ctx.globalAlpha = 1; px += cw + 4; }
   }
-  ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = '500 10px Menlo, monospace';
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = F(10, 500, true, true);   // 計器・版表示＝倍率を掛けない（開発用）
   if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl + ' ' + G.room.type : '') + '  sa ' + L.satRaw + '/' + L.sabRaw + '→' + L.sat + '/' + L.sab + '  win ' + L.w + 'x' + L.h + (isStandalone() ? ' sa-mode' : ''), 14, L.h - L.sab - 17); }
   ctx.fillText(VERSION, 14, L.h - L.sab - 5);
   // バナー
-  if (G.banner && (G.mode === 'run' || G.mode === 'home')) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = '700 22px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.oy + 100); ctx.globalAlpha = 1; }   // 部屋の上寄り（上帯の直下に置くと北の扉の看板と重なる）
+  if (G.banner && (G.mode === 'run' || G.mode === 'home')) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = F(22, 700); ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.oy + 100); ctx.globalAlpha = 1; }   // 部屋の上寄り（上帯の直下に置くと北の扉の看板と重なる）
 }
 function overlay(alpha) { ctx.fillStyle = 'rgba(5,8,16,' + alpha + ')'; ctx.fillRect(0, 0, L.w, L.h); }
-function centerText(text, y, font, col, alpha) { ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.fillStyle = col || COL.text; ctx.font = font; ctx.textAlign = 'center'; ctx.fillText(text, L.w / 2, y); ctx.globalAlpha = 1; }
+function centerText(text, y, font, col, alpha, maxW) { ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.fillStyle = col || COL.text; ctx.font = fitFont(font, text, maxW == null ? L.w - 24 : maxW); ctx.textAlign = 'center'; ctx.fillText(text, L.w / 2, y); ctx.globalAlpha = 1; }   // maxW＝既定は画面幅−24（p53＝長い1行は縮めて収める）
 function button(label, y, act, col, sub) {   // 中央寄せの大きなボタン（片手で押せる高さ）
-  const w = Math.min(300, L.w - 60), h = sub ? 56 : 48, x = (L.w - w) / 2; UI.push({ x, y, w, h, act });
+  const w = Math.min(340, L.w - 40), h = sub ? 56 : 48, x = (L.w - w) / 2; UI.push({ x, y, w, h, act });   // p53: 幅 300→340（文字1.3倍のぶん）
   ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col || '#2a3a60'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  centerText(label, y + (sub ? 24 : 31), '600 16px -apple-system, "Hiragino Sans", sans-serif', col ? col : COL.text);
-  if (sub) centerText(sub, y + 44, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+  centerText(label, y + (sub ? 24 : 31), F(16, 600), col ? col : COL.text, null, w - 16);
+  if (sub) centerText(sub, y + 44, F(11, 500), COL.mut, null, w - 16);
   return y + h + 10;
 }
 function drawOverlays() {
@@ -1273,20 +1282,20 @@ function drawOverlays() {
   UI.length = 0;
   if (G.mode === 'title') {
     overlay(0.55);
-    centerText('PRINT RUN', cy - 150, '800 44px -apple-system, "Hiragino Sans", sans-serif', COL.player);
-    centerText('―弾丸輪廻―', cy - 118, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text);
+    centerText('PRINT RUN', cy - 150, F(44, 800), COL.player);
+    centerText('―弾丸輪廻―', cy - 118, F(16, 600), COL.text);
     let y = cy - 86;
     if (G.saved) y = button('続きから', y, () => resumeRun(G.saved), COL.player, (G.saved.floor + 1 >= TUNE.floors.length ? 'FINAL' : 'FLOOR ' + (G.saved.floor + 1)) + '　HP ' + G.saved.hp + '/' + G.saved.maxHp + '　◆' + G.saved.scrap + '　袋 ' + (G.saved.bag ? G.saved.bag.length : 0) + '　' + fmt(G.saved.time));
     y = button('印刷所へ', y, () => enterHome(), G.saved ? null : COL.player, 'DAY ' + S.day + '　Cr ' + S.money + '　品 ' + wareCount() + '　◆' + S.scrapBank);
     y = button('データの書き出し／読み込み', y, () => { G.data = { msg: '' }; G.mode = 'data'; });
-    centerText('動く＝避ける　止まる＝撃つ　フリック＝ダッシュ', y + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('ダンジョンで品を拾い、店で売るか、工房で義体・銃に焼き込む', y + 34, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('死ぬと品だけ失う。スクラップ・義体・銃・型は残る', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('フロアの出口で「帰る／進む」を選べる', y + 66, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　売上 Cr ' + S.earned, y + 90, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText(VERSION + '  Phase 5-1 キャラの動き（走り4コマ・銃の絵・手続き型）＋3c-1 ビルドの骨', y + 110, '500 11px Menlo, monospace', COL.mut);
+    centerText('動く＝避ける　止まる＝撃つ　フリック＝ダッシュ', y + FS(14), F(12, 500), COL.mut);
+    centerText('ダンジョンで品を拾い、店で売るか、工房で義体・銃に焼き込む', y + FS(34), F(11, 500), COL.mut);
+    centerText('死ぬと品だけ失う。スクラップ・義体・銃・型は残る', y + FS(50), F(11, 500), COL.mut);
+    centerText('フロアの出口で「帰る／進む」を選べる', y + FS(66), F(11, 500), COL.mut);
+    centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　売上 Cr ' + S.earned, y + FS(90), F(12, 500), COL.mut);
+    centerText(VERSION + '  Phase 5-1 キャラの動き＋銃の見た目＋3c-1 ビルドの骨＋文字1.3倍', y + FS(108), F(11, 500, true, true), COL.mut);   // 版表示＝倍率を掛けない
   } else if (G.mode === 'pause') {
-    overlay(0.7); centerText('一時停止', cy - 190, '700 26px -apple-system, "Hiragino Sans", sans-serif');
+    overlay(0.7); centerText('一時停止', cy - 190, F(26, 700));
     let y = cy - 150;
     y = button('再開', y, () => { G.mode = 'run'; });
     y = button('音: ' + (S.sound ? 'ON' : 'OFF'), y, () => setSound(!S.sound));
@@ -1294,130 +1303,133 @@ function drawOverlays() {
     y = button('ダッシュ操作: ' + ({ tap: 'タップ', flick: 'フリック', both: '両方' })[S.dashInput], y, () => { S.dashInput = ({ tap: 'flick', flick: 'both', both: 'tap' })[S.dashInput] || 'tap'; save(); });
     y = button('タイトルへ', y, () => goTitle(), null, '中断セーブ＝この部屋の入口から再開できる');
     y = button('やり直す（今の刷を捨てる）', y, () => { clearRun(); newRun(); }, COL.doorClosed);
-    { const cnt = {}; for (const id of G.bag) cnt[id] = (cnt[id] || 0) + 1; const txt = GOODS.filter(g => cnt[g.id]).map(g => g.ch + '×' + cnt[g.id]).join('　'); centerText('袋 ' + G.bag.length + '/' + G.bagMax + (txt ? '　' + txt : '　（空）') + '　銃 ' + G.gun.name, y + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut); }
+    { const cnt = {}; for (const id of G.bag) cnt[id] = (cnt[id] || 0) + 1; const txt = GOODS.filter(g => cnt[g.id]).map(g => g.ch + '×' + cnt[g.id]).join('　'); centerText('袋 ' + G.bag.length + '/' + G.bagMax + (txt ? '　' + txt : '　（空）') + '　銃 ' + G.gun.name, y + 14, F(12, 500), COL.mut); }
   } else if (G.mode === 'choose' && G.choice) {
     overlay(0.78); const c = G.choice;
-    centerText(c.fam === 'implant' ? '義体パッチを選ぶ' : c.fam === 'mod' ? '銃パッチを選ぶ' : '報酬を選ぶ（義体パッチか銃パッチ）', cy - 170, '700 22px -apple-system, "Hiragino Sans", sans-serif');
-    centerText('この刷の間だけ効く（上限を超えると OC＝オーバークロック）', cy - 148, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    const w = Math.min(320, L.w - 40), h = 84, x = (L.w - w) / 2; let y = cy - 120;
+    centerText(c.fam === 'implant' ? '義体パッチを選ぶ' : c.fam === 'mod' ? '銃パッチを選ぶ' : '報酬を選ぶ（義体パッチか銃パッチ）', cy - 170, F(22, 700));
+    centerText('この刷の間だけ効く（上限を超えると OC＝オーバークロック）', cy - 148, F(12, 500), COL.mut);
+    const w = Math.min(340, L.w - 32), h = 86, x = (L.w - w) / 2; let y = cy - 120;   // p53: 幅 320→340・高さ 84→86（説明2行）
     c.opts.forEach((p, i) => {
       const col = RK[p.fam].c; UI.push({ x, y, w, h, act: () => pickChoice(p) });
       ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-      sign(x + 24, y + 30, p.fam, false);
-      ctx.fillStyle = col; ctx.font = '700 16px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.name, x + 46, y + 30);
-      ctx.fillStyle = COL.mut; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'right'; ctx.fillText((lv(p.id) ? 'Lv' + lv(p.id) + ' → ' + (lv(p.id) + 1) : 'NEW') + (lv(p.id) + 1 > TUNE.skills.max ? ' OC' : ''), x + w - 12, y + 30);
-      ctx.fillStyle = COL.text; ctx.font = '500 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(p.desc, x + 46, y + 56);
+      sign(x + 24, y + 26, p.fam, false);
+      ctx.fillStyle = col; ctx.font = F(16, 700); ctx.textAlign = 'left'; ctx.fillText(p.name, x + 46, y + 26);
+      ctx.fillStyle = COL.mut; ctx.font = F(11, 500); ctx.textAlign = 'right'; ctx.fillText((lv(p.id) ? 'Lv' + lv(p.id) + ' → ' + (lv(p.id) + 1) : 'NEW') + (lv(p.id) + 1 > TUNE.skills.max ? ' OC' : ''), x + w - 12, y + 26);
+      wrapText(p.desc, x + 46, y + FS(41), w - 46 - 12, FS(15), F(12, 500), COL.text, 'left');   // p53: 説明は2行まで折り返す（1行に縮めない）
       y += h + 12;
     });
   } else if (G.mode === 'dead') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
-    if (G.overlayT > 0.4) { centerText('刷り直し', cy - 70, '800 40px -apple-system, "Hiragino Sans", sans-serif', COL.doorClosed, a); centerText('REPRINT', cy - 44, '600 12px Menlo, monospace', COL.mut, a);
-      centerText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '　ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy - 4, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
-      centerText('失ったもの＝品 ' + G.bag.length + '個（目安 Cr ' + bagValue() + '）', cy + 22, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.doorClosed, a);
-      centerText('残ったもの＝スクラップ ◆' + G.scrap + '・義体・銃・型・住人の記憶', cy + 42, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.scrap, a);
-      if (G.overlayT > 0.7) centerText('タップで印刷所へ（新しい体に刷り直す）', cy + 80, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink); }
+    if (G.overlayT > 0.4) { centerText('刷り直し', cy - 70, F(40, 800), COL.doorClosed, a); centerText('REPRINT', cy - 44, F(12, 600, true), COL.mut, a);
+      centerText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '　ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy - 4, F(14, 500), COL.text, a);
+      centerText('失ったもの＝品 ' + G.bag.length + '個（目安 Cr ' + bagValue() + '）', cy + 22, F(13, 500), COL.doorClosed, a);
+      centerText('残ったもの＝スクラップ ◆' + G.scrap + '・義体・銃・型・住人の記憶', cy + 42, F(13, 500), COL.scrap, a);
+      if (G.overlayT > 0.7) centerText('タップで印刷所へ（新しい体に刷り直す）', cy + 80, F(16, 600), COL.text, blink); }
   } else if (G.mode === 'floorclear') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.6 * a);
-    centerText('FLOOR ' + (G.floorIdx + 1) + ' CLEAR', cy - 150, '800 36px -apple-system, "Hiragino Sans", sans-serif', COL.portal, a);
-    centerText('部屋 ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　◆' + G.scrap + '　袋 ' + G.bag.length + '/' + G.bagMax + '（目安 Cr ' + bagValue() + '）　' + fmt(G.time), cy - 108, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
+    centerText('FLOOR ' + (G.floorIdx + 1) + ' CLEAR', cy - 150, F(36, 800), COL.portal, a);
+    centerText('部屋 ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　◆' + G.scrap + '　袋 ' + G.bag.length + '/' + G.bagMax + '（目安 Cr ' + bagValue() + '）　' + fmt(G.time), cy - 108, F(13, 500), COL.text, a);
     if (G.overlayT > 0.7) {
       let y = cy - 70;
       y = button(G.floorIdx + 2 >= TUNE.floors.length ? '進む（最終フロア＝ボス）' : '進む（FLOOR ' + (G.floorIdx + 2) + '）', y, () => nextFloor(), COL.portal, '深いほど良い品が出る。死ぬと袋の品は失う');
       y = button('帰る（印刷所へ）', y, () => leaveDungeon(), COL.player, '袋の品 ' + G.bag.length + '個とスクラップ ◆' + G.scrap + ' を全部持ち帰る');
       const ei = exitInfo();   // 帰る材料（R16）＝いま帰れば作れる型／あと少しの型
-      if (ei.can.length) centerText('いま帰れば焼き込める＝' + ei.can.slice(0, 2).map(g => g.name).join('・') + (ei.can.length > 2 ? ' ほか' : ''), y + 6, '600 12px -apple-system, "Hiragino Sans", sans-serif', COL.mod, a);
-      else if (ei.near.length) { const nr = ei.near[0]; centerText('あと ' + Object.keys(nr.miss).map(k => GOOD[k].ch + '×' + nr.miss[k]).join(' ') + ' で ' + nr.g.name + '　←' + Object.keys(nr.miss).map(k => GOOD[k].src).join('・'), y + 6, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.text, a); }
-      else centerText('（袋と倉庫で作れる型はまだない）', y + 6, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
-    } else centerText('……', cy - 40, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
+      if (ei.can.length) centerText('いま帰れば焼き込める＝' + ei.can.slice(0, 2).map(g => g.name).join('・') + (ei.can.length > 2 ? ' ほか' : ''), y + 6, F(12, 600), COL.mod, a);
+      else if (ei.near.length) { const nr = ei.near[0]; centerText('あと ' + Object.keys(nr.miss).map(k => GOOD[k].ch + '×' + nr.miss[k]).join(' ') + ' で ' + nr.g.name + '　←' + Object.keys(nr.miss).map(k => GOOD[k].src).join('・'), y + 6, F(12, 500), COL.text, a); }
+      else centerText('（袋と倉庫で作れる型はまだない）', y + 6, F(11, 500), COL.mut, a);
+    } else centerText('……', cy - 40, F(16, 600), COL.mut, a);
   } else if (G.mode === 'win') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
-    centerText('PRINT COMPLETE', cy - 70, '800 36px -apple-system, "Hiragino Sans", sans-serif', COL.player, a);
-    centerText('この義体は最後まで刷り上がった', cy - 42, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut, a);
-    centerText('撃破 ' + G.kills + '　' + fmt(G.time) + '　部品 ' + Object.keys(G.parts).length + '種', cy + 0, '500 14px -apple-system, "Hiragino Sans", sans-serif', COL.text, a);
-    centerText('品 ' + G.bag.length + '個（目安 Cr ' + bagValue() + '）とスクラップ ◆' + G.scrap + ' を持ち帰る', cy + 24, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.scrap, a);
-    if (G.overlayT > 0.7) centerText('タップで印刷所へ', cy + 64, '600 16px -apple-system, "Hiragino Sans", sans-serif', COL.text, blink);
+    centerText('PRINT COMPLETE', cy - 70, F(36, 800), COL.player, a);
+    centerText('この義体は最後まで刷り上がった', cy - 42, F(12, 500), COL.mut, a);
+    centerText('撃破 ' + G.kills + '　' + fmt(G.time) + '　部品 ' + Object.keys(G.parts).length + '種', cy + 0, F(14, 500), COL.text, a);
+    centerText('品 ' + G.bag.length + '個（目安 Cr ' + bagValue() + '）とスクラップ ◆' + G.scrap + ' を持ち帰る', cy + 24, F(12, 500), COL.scrap, a);
+    if (G.overlayT > 0.7) centerText('タップで印刷所へ', cy + 64, F(16, 600), COL.text, blink);
   } else if (G.mode === 'swap' && G.swap) {
     overlay(0.8); const g = GOOD[G.swap.id];
-    centerText('袋がいっぱい（' + G.bag.length + '/' + G.bagMax + '）', cy - 200, '700 22px -apple-system, "Hiragino Sans", sans-serif');
-    centerText('拾いたい物＝' + g.name + '（目安 Cr ' + g.base + '）', cy - 174, '600 14px -apple-system, "Hiragino Sans", sans-serif', g.col);
-    centerText('捨てる物をタップ（捨てた物は消える）', cy - 154, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    centerText('袋がいっぱい（' + G.bag.length + '/' + G.bagMax + '）', cy - 200, F(22, 700));
+    centerText('拾いたい物＝' + g.name + '（目安 Cr ' + g.base + '）', cy - 174, F(14, 600), g.col);
+    centerText('捨てる物をタップ（捨てた物は消える）', cy - 154, F(12, 500), COL.mut);
     tileGrid(G.bag.map((id, i) => ({ ch: GOOD[id].ch, name: GOOD[id].name, sub: 'Cr ' + GOOD[id].base, col: GOOD[id].col, act: () => swapPick(i) })), cy - 140, 4);
     button('拾わない（その場に残す）', L.h - L.sab - 120, () => swapPick(-1), null);
   } else if (G.mode === 'launch') {
-    overlay(0.8); centerText('出撃口', cy - 200, '700 24px -apple-system, "Hiragino Sans", sans-serif', COL.exit);
+    overlay(0.8); centerText('出撃口', cy - 200, F(24, 700), COL.exit);
     const g = GUN[S.gun] || GUNS[0]; let y = cy - 160;
     if (G.saved) y = button('続きから', y, () => resumeRun(G.saved), COL.player, (G.saved.floor + 1 >= TUNE.floors.length ? 'FINAL' : 'FLOOR ' + (G.saved.floor + 1)) + '　HP ' + G.saved.hp + '/' + G.saved.maxHp + '　◆' + G.saved.scrap + '　袋 ' + (G.saved.bag ? G.saved.bag.length : 0));
     y = button(G.saved ? '新しい刷（続きは消える）' : '出撃（新しい刷）', y, () => { clearRun(); newRun(); }, G.saved ? null : COL.player, '銃＝' + g.name + (S.gunLv[g.id] ? '+1' : '') + '　袋 ' + bagCap() + '枠　HP ' + (FRAME().hp + permLv('armor')));
     if (S.guns.length > 1) y = button('銃を替える: ' + g.name, y, () => { const i = S.guns.indexOf(S.gun); equipGun(S.guns[(i + 1) % S.guns.length]); }, COL.mod, g.desc);
     y = button('戻る', y, () => closeHome());
   } else if (G.mode === 'store') {
-    overlay(0.8); centerText('倉庫', cy - 200, '700 24px -apple-system, "Hiragino Sans", sans-serif', COL.scrap);
-    centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '　品は売るか、工房で焼き込む素材にする', cy - 176, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    const ny = tileGrid(GOODS.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base + '　' + g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, 2);
-    centerText('売り物は店の棚へ。値付けは安／適／高の3段階', ny + 14, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    overlay(0.8); centerText('倉庫', cy - 200, F(24, 700), COL.scrap);
+    centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '　品は売るか、工房で焼き込む素材にする', cy - 176, F(12, 500), COL.mut);
+    const ny = tileGrid(GOODS.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, sub2: g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, 2);   // p53: 出どころは2行目（2列×3段＝出どころの文が3列では入らない）
+    centerText('売り物は店の棚へ。値付けは安／適／高の3段階', ny + 14, F(12, 500), COL.mut);
     button('戻る', ny + 30, () => closeHome());
   } else if (G.mode === 'forge') {
     drawForge(cy);
   } else if (G.mode === 'forgeSlot' && G.forge) {
     drawForgeSlot(cy);
   } else if (G.mode === 'talk') {
-    overlay(0.82); centerText(NPC.name + '（' + NPC.title + '）', cy - 200, '700 22px -apple-system, "Hiragino Sans", sans-serif', COL.implant);
+    overlay(0.82); centerText(NPC.name + '（' + NPC.title + '）', cy - 200, F(22, 700), COL.implant);
     ctx.fillStyle = COL.implant; ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(L.w / 2, cy - 130, 34, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = COL.implant; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(L.w / 2, cy - 130, 34, 0, 6.2832); ctx.stroke();
-    wrapText(S.npcIdx > 0 ? npcLine() : '……誰だ？　ああ、刷り上がったばかりか。まず一度、外へ出てこい。', L.w / 2, cy - 70, Math.min(320, L.w - 50), 22, '500 15px -apple-system, "Hiragino Sans", sans-serif', COL.text);
-    centerText('（帰ってくるたびに1行進む　' + Math.min(S.npcIdx, NPC.lines.length) + '/' + NPC.lines.length + '）', cy + 40, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    if (S.lastRun) centerText('前回＝' + (S.lastRun.kind === 'dead' ? '刷り直し' : S.lastRun.kind === 'win' ? '完走' : '帰還') + '　FLOOR ' + S.lastRun.floor + '　撃破 ' + S.lastRun.kills + '　品 ' + S.lastRun.goods + (S.lastRun.lost ? '（失った ' + S.lastRun.lost + '）' : ''), cy + 60, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    button('戻る', cy + 84, () => closeHome());
+    let ty = wrapText(S.npcIdx > 0 ? npcLine() : '……誰だ？　ああ、刷り上がったばかりか。まず一度、外へ出てこい。', L.w / 2, cy - 70, Math.min(340, L.w - 40), FS(22), F(15, 500), COL.text);   // p53: 行数が増えても後続行が重ならないよう戻り値で続ける
+    ty = Math.max(ty, cy + 40);
+    centerText('（帰ってくるたびに1行進む　' + Math.min(S.npcIdx, NPC.lines.length) + '/' + NPC.lines.length + '）', ty, F(11, 500), COL.mut);
+    if (S.lastRun) centerText('前回＝' + (S.lastRun.kind === 'dead' ? '刷り直し' : S.lastRun.kind === 'win' ? '完走' : '帰還') + '　FLOOR ' + S.lastRun.floor + '　撃破 ' + S.lastRun.kills + '　品 ' + S.lastRun.goods + (S.lastRun.lost ? '（失った ' + S.lastRun.lost + '）' : ''), ty + FS(20), F(11, 500), COL.mut);
+    button('戻る', ty + FS(44), () => closeHome());
   } else if (G.mode === 'data') {
-    overlay(0.85); centerText('データの書き出し／読み込み', cy - 200, '700 20px -apple-system, "Hiragino Sans", sans-serif');
-    centerText('ブラウザの保存領域は消えることがある。文字列をメモ等に控えておけば戻せる', cy - 176, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+    overlay(0.85); centerText('データの書き出し／読み込み', cy - 200, F(20, 700));
+    centerText('ブラウザの保存領域は消えることがある。文字列をメモ等に控えておけば戻せる', cy - 176, F(11, 500), COL.mut);
     let y = cy - 150;
     y = button('書き出し（文字列をコピー）', y, () => dataExport(), COL.player, 'DAY ' + S.day + '　Cr ' + S.money + '　品 ' + wareCount() + '　銃 ' + S.guns.length + '丁　義体 ' + S.owned.length + '　型 ' + S.molds.length + (loadRun() ? '　＋中断中の刷' : ''));
-    y = button('読み込み（コピーした文字列を貼り付け）', y, () => dataImport(), COL.doorClosed, '今のデータは上書きされる');
-    if (G.data && G.data.msg) wrapText(G.data.msg, L.w / 2, y + 16, Math.min(320, L.w - 50), 18, '500 13px -apple-system, "Hiragino Sans", sans-serif', COL.text);
+    y = button('読み込み（文字列を貼り付け）', y, () => dataImport(), COL.doorClosed, 'コピーしておいた文字列を貼る。今のデータは上書きされる');
+    if (G.data && G.data.msg) wrapText(G.data.msg, L.w / 2, y + 16, Math.min(340, L.w - 40), FS(18), F(13, 500), COL.text);
     button('戻る', y + 70, () => goTitle());
   } else if (G.mode === 'shop' && G.shop) {
     drawShop(cy);
   }
 }
 function bagValue() { return G.bag.reduce((a, id) => a + (GOOD[id] ? GOOD[id].base : 0), 0); }
-function wrapText(text, cx, y, maxW, lh, font, col) {   // 日本語＝1文字ずつ折り返す
-  ctx.font = font; ctx.fillStyle = col || COL.text; ctx.textAlign = 'center'; let line = '';
+function wrapText(text, cx, y, maxW, lh, font, col, align) {   // 日本語＝1文字ずつ折り返す（align＝'left' なら cx を左端にする・p53）
+  ctx.font = font; ctx.fillStyle = col || COL.text; ctx.textAlign = align || 'center'; let line = '';
   for (const ch of String(text)) { if (ch === '\n' || ctx.measureText(line + ch).width > maxW) { ctx.fillText(line, cx, y); y += lh; line = ch === '\n' ? '' : ch; } else line += ch; }
   if (line) ctx.fillText(line, cx, y); return y + lh;
 }
 function tileGrid(items, y, cols) {   // 小さなタイルのグリッド（袋の中身・倉庫）。act があれば押せる
-  const w = Math.min(340, L.w - 32), gap = 8, tw = (w - gap * (cols - 1)) / cols, th = 54, x0 = (L.w - w) / 2;
+  const w = Math.min(340, L.w - 32), gap = 8, tw = (w - gap * (cols - 1)) / cols, sub2 = items.some(it => it.sub2), th = FS(50) + (sub2 ? FS(12) : 0), x0 = (L.w - w) / 2;   // p53: 高さ 54→FS(50)=65・sub2（2行目の補足）があれば +FS(12)
   items.forEach((it, i) => { const x = x0 + (i % cols) * (tw + gap), yy = y + Math.floor(i / cols) * (th + gap);
     if (it.act) UI.push({ x, y: yy, w: tw, h: th, act: it.act });
     ctx.globalAlpha = it.dim ? 0.35 : 1; ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, yy, tw, th); ctx.strokeStyle = it.col || '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, yy + 0.5, tw - 1, th - 1);
-    ctx.fillStyle = it.col || COL.text; ctx.font = '700 16px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'left'; ctx.fillText(it.ch, x + 8, yy + 24);
-    ctx.fillStyle = COL.text; ctx.font = (cols >= 4 ? '600 10px' : '600 11px') + ' -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(it.name, x + (cols >= 4 ? 26 : 30), yy + 21);
-    ctx.fillStyle = COL.mut; ctx.font = '500 11px Menlo, monospace'; ctx.fillText(it.sub || '', x + 8, yy + 44); ctx.globalAlpha = 1; });
+    ctx.fillStyle = it.col || COL.text; ctx.font = F(16, 700); ctx.textAlign = 'left'; ctx.fillText(it.ch, x + 8, yy + FS(22));
+    const nx = cols >= 4 ? FS(24) : FS(28); ctx.fillStyle = COL.text; ctx.font = fitFont(F(cols >= 4 ? 10 : 11, 600), it.name, tw - nx - 4); ctx.fillText(it.name, x + nx, yy + FS(19));   // p53: 名前は枠に収める
+    ctx.fillStyle = COL.mut; ctx.font = fitFont(F(11, 500, true), it.sub || '', tw - 12); ctx.fillText(it.sub || '', x + 8, yy + FS(41));
+    if (it.sub2) { ctx.font = fitFont(F(10, 500), it.sub2, tw - 12); ctx.fillText(it.sub2, x + 8, yy + FS(41) + FS(12)); } ctx.globalAlpha = 1; });
   return y + Math.ceil(items.length / cols) * (th + gap);
 }
 function skillLine(list) { return list.map(o => o.k.short + (o.n > 1 ? '×' + o.n : '')).join(' '); }
 function gearSkillText(g) { return Object.keys(g.skills).length ? Object.keys(g.skills).map(k => PART[k].name + ' Lv' + g.skills[k]).join('・') : 'スキル無し'; }
 function drawForge(cy) {   // 工房＝6マス（頭・胴・腕・腰・脚・銃）＋スキル合計1列。マスを押すとその部位の候補（R18＝1画面1判断）
   overlay(0.85); const top = L.sat + 12;
-  ctx.textAlign = 'left'; ctx.fillStyle = COL.mod; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('工房', 16, top + 24);
-  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money + '　品 ' + wareCount(), L.w - 16, top + 24);
-  centerText('部位を押す→候補を選ぶ。型は素材（品）と Cr で焼き込む', top + 46, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.mod; ctx.font = F(20, 700); ctx.fillText('工房', 16, top + 24);
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = F(15, 700, true); ctx.fillText('Cr ' + S.money + '　品 ' + wareCount(), L.w - 16, top + 24);
+  centerText('部位を押す→候補を選ぶ。型は素材（品）と Cr で焼き込む', top + 46, F(11, 500), COL.mut);
   const items = SLOTS.map(sl => { const g = GEARM[S.gear[sl.id]]; return { ch: sl.ch, name: g.name, sub: Object.keys(g.skills).map(k => PART[k].short + g.skills[k]).join(' ') || '—', col: g.tier === 2 ? COL.portal : g.tier === 1 ? COL.implant : COL.mut, act: () => { G.forge = { slot: sl.id, msg: '' }; G.mode = 'forgeSlot'; } }; });
   const gun = GUN[S.gun] || GUNS[0]; items.push({ ch: '銃', name: gun.name, sub: (S.gunLv[gun.id] ? PART[gun.sig].short + '1 ' : '') + '段' + (S.gunLv[gun.id] | 0), col: COL.mod, act: () => { G.forge = { slot: 'gun', msg: '' }; G.mode = 'forgeSlot'; } });
   let y = tileGrid(items, top + 58, 3);
   const pl = permList(); ctx.textAlign = 'left';
-  centerText('スキル合計（恒久）＝' + (pl.length ? skillLine(pl) : 'なし'), y + 14, '600 12px -apple-system, "Hiragino Sans", sans-serif', COL.text);
-  centerText('HP ' + (FRAME().hp + permLv('armor')) + '　速度 ' + Math.round(FRAME().spd * (1 + 0.12 * permLv('legs'))) + '　袋 ' + bagCap() + '　射程 ' + Math.round(gun.range * (1 + 0.25 * permLv('range')) * (1 + 0.15 * permLv('aim'))) + (S.bagBonus ? '　（旧版の枠 +' + S.bagBonus + ' を含む）' : ''), y + 32, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-  centerText('型（設計図）＝' + S.molds.length + '/' + GEAR.filter(g => g.tier > 0).length + '　王型の型はボスが落とす（死んでも残る）', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-  button('戻る', y + 66, () => closeHome());
+  centerText('スキル合計（恒久）＝' + (pl.length ? skillLine(pl) : 'なし'), y + FS(14), F(12, 600), COL.text);
+  centerText('HP ' + (FRAME().hp + permLv('armor')) + '　速度 ' + Math.round(FRAME().spd * (1 + 0.12 * permLv('legs'))) + '　袋 ' + bagCap() + '　射程 ' + Math.round(gun.range * (1 + 0.25 * permLv('range')) * (1 + 0.15 * permLv('aim'))) + (S.bagBonus ? '　（旧版の枠 +' + S.bagBonus + ' を含む）' : ''), y + FS(32), F(11, 500), COL.mut);
+  centerText('型（設計図）＝' + S.molds.length + '/' + GEAR.filter(g => g.tier > 0).length + '　王型の型はボスが落とす（死んでも残る）', y + FS(50), F(11, 500), COL.mut);
+  button('戻る', y + FS(66), () => closeHome());
 }
 function card(y, title, tag, tagCol, line2, line3, col, act) {   // 工房の候補カード＝3行（名前＋状態／スキル／材料）。act があれば押せる
-  const w = Math.min(340, L.w - 32), h = 66, x = (L.w - w) / 2; if (act) UI.push({ x, y, w, h, act });
+  const w = Math.min(340, L.w - 32), h = FS(66), x = (L.w - w) / 2; if (act) UI.push({ x, y, w, h, act });   // p53: 高さも文字に追従
   ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col || '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  ctx.textAlign = 'left'; ctx.fillStyle = col || COL.text; ctx.font = '700 14px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(title, x + 10, y + 20);
-  ctx.textAlign = 'right'; ctx.fillStyle = tagCol || COL.mut; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(tag, x + w - 10, y + 20);
-  ctx.textAlign = 'left'; ctx.fillStyle = COL.text; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(line2, x + 10, y + 39);
-  if (line3) { let px = x + 10; ctx.font = '500 11px Menlo, monospace'; for (const seg of line3) { ctx.fillStyle = seg.col || COL.mut; ctx.fillText(seg.t, px, y + 57); px += ctx.measureText(seg.t).width; } }
+  ctx.font = F(11, 600); const tagW = ctx.measureText(tag || '').width;
+  ctx.textAlign = 'left'; ctx.fillStyle = col || COL.text; ctx.font = fitFont(F(14, 700), title, w - 20 - tagW - 8); ctx.fillText(title, x + 10, y + FS(20));
+  ctx.textAlign = 'right'; ctx.fillStyle = tagCol || COL.mut; ctx.font = F(11, 600); ctx.fillText(tag, x + w - 10, y + FS(20));
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.text; ctx.font = fitFont(F(11, 500), line2, w - 20); ctx.fillText(line2, x + 10, y + FS(39));
+  if (line3) { let px = x + 10; ctx.font = F(11, 500, true); for (const seg of line3) { ctx.fillStyle = seg.col || COL.mut; ctx.fillText(seg.t, px, y + FS(57)); px += ctx.measureText(seg.t).width; } }
   return y + h + 8;
 }
 function costSegs(cost, cr) {   // 材料＝持っている分は普通の色・足りない分は赤（＋出どころ）
@@ -1430,21 +1442,22 @@ function costSegs(cost, cr) {   // 材料＝持っている分は普通の色・
 function drawForgeSlot(cy) {   // 部位の候補＝標準／街路型／王型（または銃4丁＋段1）
   overlay(0.85); const f = G.forge, top = L.sat + 12;
   if (f.slot === 'gun') {
-    ctx.textAlign = 'left'; ctx.fillStyle = COL.mod; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('銃', 16, top + 24);
-    ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money, L.w - 16, top + 24);
+    ctx.textAlign = 'left'; ctx.fillStyle = COL.mod; ctx.font = F(20, 700); ctx.fillText('銃', 16, top + 24);
+    ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = F(15, 700, true); ctx.fillText('Cr ' + S.money, L.w - 16, top + 24);
     let y = top + 44;
     for (const g of GUNS) { const own = S.guns.includes(g.id), eq = S.gun === g.id, lvl = S.gunLv[g.id] | 0;
       y = card(y, g.name + (lvl ? '＋1' : ''), eq ? '装備中' : own ? '持っている→装備' : '買う Cr ' + g.price, eq ? COL.player : own ? COL.text : S.money >= g.price ? COL.mod : COL.mut, g.desc + (lvl ? '　段1＝' + PART[g.sig].name + ' +1' : ''), null, eq ? COL.player : own ? COL.text : COL.mod, () => { if (own) { equipGun(g.id); forgeMsg(g.name + ' を装備した'); } else if (buyGun(g.id)) forgeMsg(g.name + ' を買って装備した'); else forgeMsg('Cr が足りない（' + g.price + ' 必要）'); }); }
     const gun = GUN[S.gun] || GUNS[0];
     if (!(S.gunLv[gun.id] | 0)) y = card(y, gun.name + ' に段1を焼き込む', '性格スキル', COL.mod, PART[gun.sig].name + ' +1（' + PART[gun.sig].desc + '）', costSegs(gun.cost1, gun.cr1), COL.mod, () => forgeGun(gun.id));
     else y = card(y, gun.name + '　段1 済', '派生は 3c-2', COL.mut, PART[gun.sig].name + ' +1 が恒久で付いている', null, COL.mut, null);
-    if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(330, L.w - 40), 16, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.text) + 4;
+    if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(340, L.w - 32), FS(16), F(12, 500), COL.text) + 4;
     button('戻る', Math.max(y + 4, L.h - L.sab - 110), () => { G.mode = 'forge'; G.forge = null; });
     return;
   }
   const sl = SLOT[f.slot], cur = GEARM[S.gear[sl.id]];
-  ctx.textAlign = 'left'; ctx.fillStyle = COL.implant; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(sl.name + '（' + sl.part + '）＝' + sl.desc, 16, top + 24);
-  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money, L.w - 16, top + 24);
+  ctx.font = F(15, 700, true); const crW = ctx.measureText('Cr ' + S.money).width;
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.implant; ctx.font = fitFont(F(20, 700), sl.name + '（' + sl.part + '）＝' + sl.desc, L.w - 32 - crW - 12); ctx.fillText(sl.name + '（' + sl.part + '）＝' + sl.desc, 16, top + 24);   // p53: 右の Cr と重ねない
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = F(15, 700, true); ctx.fillText('Cr ' + S.money, L.w - 16, top + 24);
   let y = top + 44;
   for (const g of GEAR.filter(g => g.slot === sl.id)) {
     const eq = cur === g, own = g.tier === 0 || S.owned.includes(g.id), mold = g.tier === 0 || S.molds.includes(g.id);
@@ -1454,55 +1467,57 @@ function drawForgeSlot(cy) {   // 部位の候補＝標準／街路型／王型�
     const act = eq ? null : own ? () => equipGear(g.id) : mold ? () => craftGear(g.id) : null;
     y = card(y, g.name, tag, tagCol, gearSkillText(g), (!own && g.cost) ? costSegs(g.cost, g.cr) : null, col, act);
   }
-  if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(330, L.w - 40), 16, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.text) + 4;
+  if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(340, L.w - 32), FS(16), F(12, 500), COL.text) + 4;
   button('戻る', Math.max(y + 4, L.h - L.sab - 110), () => { G.mode = 'forge'; G.forge = null; });
 }
 function drawShop(cy) {   // 店の1日＝上に棚3つ、中に客が歩く土間、下にボタン
   const sh = G.shop; overlay(0.92);
-  const top = L.sat + 12; ctx.textAlign = 'left'; ctx.fillStyle = COL.shop; ctx.font = '700 20px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('店　DAY ' + S.day, 16, top + 24);
-  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = '700 15px Menlo, monospace'; ctx.fillText('Cr ' + S.money + (sh.sales ? '  (+' + sh.sales + ')' : ''), L.w - 16, top + 24);
+  const top = L.sat + 12; ctx.textAlign = 'left'; ctx.fillStyle = COL.shop; ctx.font = F(20, 700); ctx.fillText('店　DAY ' + S.day, 16, top + 24);
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = F(15, 700, true); ctx.fillText('Cr ' + S.money + (sh.sales ? '  (+' + sh.sales + ')' : ''), L.w - 16, top + 24);
   // 棚
-  const w = Math.min(340, L.w - 32), gap = 8, n = sh.shelves.length, tw = (w - gap * (n - 1)) / n, th = 78, x0 = (L.w - w) / 2, sy = top + 44;
+  const w = Math.min(340, L.w - 32), gap = 8, n = sh.shelves.length, tw = (w - gap * (n - 1)) / n, th = FS(70), x0 = (L.w - w) / 2, sy = top + 44;   // p53: 棚の高さ 78→FS(70)=91
   sh.shelves.forEach((s, i) => { const x = x0 + i * (tw + gap);
     if (sh.phase === 'setup') UI.push({ x, y: sy, w: tw, h: th, act: () => { if (s) { shelfClear(i); } else { sh.pick = i; sh.tier = null; } } });
     ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, sy, tw, th); ctx.strokeStyle = s ? GOOD[s.id].col : '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, sy + 0.5, tw - 1, th - 1);
     ctx.textAlign = 'center';
-    if (!s) { ctx.fillStyle = COL.mut; ctx.font = '700 22px sans-serif'; ctx.fillText('＋', x + tw / 2, sy + 40); ctx.font = '500 10px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(sh.phase === 'setup' ? '棚に置く' : '空', x + tw / 2, sy + 62); }
-    else { const g = GOOD[s.id]; ctx.fillStyle = g.col; ctx.font = '700 18px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(g.ch + ' ×' + s.n, x + tw / 2, sy + 28); ctx.fillStyle = COL.text; ctx.font = '600 11px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(g.name, x + tw / 2, sy + 46); ctx.fillStyle = s.tier === 'low' ? COL.implant : s.tier === 'high' ? COL.doorClosed : COL.scrap; ctx.font = '700 12px Menlo, monospace'; ctx.fillText(TUNE.shop.tiers[s.tier].label + ' Cr ' + s.price, x + tw / 2, sy + 66); }
+    if (!s) { ctx.fillStyle = COL.mut; ctx.font = F(22, 700); ctx.fillText('＋', x + tw / 2, sy + FS(36)); ctx.font = F(10, 500); ctx.fillText(sh.phase === 'setup' ? '棚に置く' : '空', x + tw / 2, sy + FS(58)); }
+    else { const g = GOOD[s.id]; ctx.fillStyle = g.col; ctx.font = F(18, 700); ctx.fillText(g.ch + ' ×' + s.n, x + tw / 2, sy + FS(26)); ctx.fillStyle = COL.text; ctx.font = fitFont(F(11, 600), g.name, tw - 8); ctx.fillText(g.name, x + tw / 2, sy + FS(43)); ctx.fillStyle = s.tier === 'low' ? COL.implant : s.tier === 'high' ? COL.doorClosed : COL.scrap; ctx.font = F(12, 700, true); ctx.fillText(TUNE.shop.tiers[s.tier].label + ' Cr ' + s.price, x + tw / 2, sy + FS(61)); }
   });
   // 土間＝客が歩く
-  const fy = sy + th + 10, fh = Math.max(120, L.h - L.sab - 200 - fy);
+  const pickShift = (sh.phase === 'setup' && sh.pick !== null && sh.tier === null) ? 2 * (FS(50) - 54) + 4 : 0;   // p53: 品を選ぶグリッドが高くなった分だけ土間を縮める（「入口」と見出しを重ねない）
+  const fy = sy + th + 10, fh = Math.max(120, L.h - L.sab - 200 - fy - pickShift);
   ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fillRect(x0, fy, w, fh); ctx.strokeStyle = '#1f2c4c'; ctx.strokeRect(x0 + 0.5, fy + 0.5, w - 1, fh - 1);
-  ctx.fillStyle = COL.mut; ctx.font = '500 10px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText('入口', x0 + w / 2, fy + fh - 6);
+  ctx.fillStyle = COL.mut; ctx.font = F(10, 500); ctx.textAlign = 'center'; ctx.fillText('入口', x0 + w / 2, fy + fh - 6);
   for (const c of sh.custs) { const tx = c.i >= 0 ? x0 + c.i * (tw + gap) + tw / 2 : x0 + w / 2, ty = fy + 18, ex = x0 + w / 2, ey = fy + fh - 16;
     let k = c.st === 'walk' ? Math.min(1, c.t / TUNE.shop.walkT) : c.st === 'react' ? 1 : 1 - Math.min(1, c.t / 0.6); const px = ex + (tx - ex) * k, py = ey + (ty - ey) * k;
     ctx.fillStyle = '#2b3d6b'; ctx.beginPath(); ctx.arc(px, py, 9, 0, 6.2832); ctx.fill(); ctx.strokeStyle = COL.text; ctx.lineWidth = 1.5; ctx.stroke();
-    if (c.st === 'react' && c.text) { ctx.fillStyle = c.col; ctx.font = '700 12px -apple-system, "Hiragino Sans", sans-serif'; ctx.textAlign = 'center'; ctx.fillText(c.text, px, py - 16); if (c.say) { ctx.fillStyle = COL.mut; ctx.font = '500 10px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText('「' + c.say + '」', px, py + 24); } } }
+    if (c.st === 'react' && c.text) { ctx.fillStyle = c.col; ctx.font = F(12, 700); ctx.textAlign = 'center'; ctx.fillText(c.text, px, py - 16); if (c.say) { ctx.fillStyle = COL.mut; ctx.font = F(10, 500); ctx.fillText('「' + c.say + '」', px, py + 24); } } }
   // 記録
-  ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = '500 11px -apple-system, "Hiragino Sans", sans-serif'; sh.log.slice(0, 4).forEach((t, i) => ctx.fillText(t, x0 + 8, fy + fh - 66 + i * 14));   // 記録＝土間の下側（客の反応は上側の棚のそば）
+  ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = F(11, 500); sh.log.slice(0, 4).forEach((t, i) => { ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, fy + fh - FS(66) + i * FS(14)); });   // p53: 客の一言つきの長い行は縮めて収める   // 記録＝土間の下側（客の反応は上側の棚のそば）
   ctx.textAlign = 'right'; ctx.fillText(sh.phase === 'setup' ? '棚をタップして品を置く' : sh.phase === 'open' ? '客 ' + sh.served + '/' + TUNE.shop.customers : '閉店', x0 + w - 8, fy + 16);
   // 下のボタン／品の選択／値付け
   let y = L.h - L.sab - 180;
   if (sh.phase === 'setup' && sh.pick !== null) {
     if (sh.tier === null) {   // 品を選ぶ
+      y -= pickShift;   // p53: タイルが高くなった分（2段）だけ上へ
       const avail = GOODS.filter(g => (S.warehouse[g.id] | 0) > 0);
-      if (!avail.length) { centerText('倉庫に品がない', y + 20, '600 14px -apple-system, "Hiragino Sans", sans-serif', COL.mut); button('やめる', y + 40, () => { sh.pick = null; }); return; }
-      centerText('棚 ' + (sh.pick + 1) + ' に置く品を選ぶ', y - 6, '600 13px -apple-system, "Hiragino Sans", sans-serif');
-      const ny = tileGrid(avail.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, act: () => { sh.tier = g.id; } })), y + 4, 2);
+      if (!avail.length) { centerText('倉庫に品がない', y + 20, F(14, 600), COL.mut); button('やめる', y + 40, () => { sh.pick = null; }); return; }
+      centerText('棚 ' + (sh.pick + 1) + ' に置く品を選ぶ', y - 6, F(13, 600));
+      const ny = tileGrid(avail.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, act: () => { sh.tier = g.id; } })), y + 4, 3);   // p53: 3列（品5種でも2段に収まる）
       button('やめる', ny + 4, () => { sh.pick = null; });
     } else {   // 値付け（sh.tier に品idを一時的に入れている）
-      const g = GOOD[sh.tier]; centerText(g.name + '　基準 Cr ' + g.base + '　値付けを選ぶ', y - 6, '600 13px -apple-system, "Hiragino Sans", sans-serif', g.col);
+      const g = GOOD[sh.tier]; centerText(g.name + '　基準 Cr ' + g.base + '　値付けを選ぶ', y - 6, F(13, 600), g.col);
       const bw = (Math.min(340, L.w - 32) - 16) / 3, bx0 = (L.w - Math.min(340, L.w - 32)) / 2;
       [['low', COL.implant], ['mid', COL.scrap], ['high', COL.doorClosed]].forEach(([t, col], i) => { const x = bx0 + i * (bw + 8), tr = TUNE.shop.tiers[t]; UI.push({ x, y: y + 4, w: bw, h: 56, act: () => { shelfPut(sh.pick, g.id, t); sh.pick = null; sh.tier = null; } });
         ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y + 4, bw, 56); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, y + 4.5, bw - 1, 55);
-        ctx.textAlign = 'center'; ctx.fillStyle = col; ctx.font = '700 16px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(tr.label + '　Cr ' + Math.round(g.base * tr.k), x + bw / 2, y + 28); ctx.fillStyle = COL.mut; ctx.font = '500 10px -apple-system, "Hiragino Sans", sans-serif'; ctx.fillText(t === 'low' ? 'ほぼ全員が買う' : t === 'mid' ? '多くが買う' : '買う人は少ない', x + bw / 2, y + 48); });
+        ctx.textAlign = 'center'; ctx.fillStyle = col; ctx.font = F(16, 700); ctx.font = fitFont(F(16, 700), tr.label + '　Cr ' + Math.round(g.base * tr.k), bw - 8); ctx.fillText(tr.label + '　Cr ' + Math.round(g.base * tr.k), x + bw / 2, y + 28); ctx.fillStyle = COL.mut; ctx.font = fitFont(F(10, 500), t === 'low' ? 'ほぼ全員が買う' : t === 'mid' ? '多くが買う' : '買う人は少ない', bw - 8); ctx.fillText(t === 'low' ? 'ほぼ全員が買う' : t === 'mid' ? '多くが買う' : '買う人は少ない', x + bw / 2, y + 48); });
       button('やめる', y + 70, () => { sh.pick = null; sh.tier = null; });
     }
     return;
   }
   if (sh.phase === 'setup') { y = button('開店', y, () => shopOpen(), shopStocked().length ? COL.shop : null, shopStocked().length ? '客が ' + TUNE.shop.customers + ' 人来る。棚の品をタップで倉庫へ戻す' : '棚に品を置いてから'); y = button('戻る', y, () => shopClose()); }
   else if (sh.phase === 'open') { y = button('閉店（早じまい）', y, () => shopClose(), null, '売れ残りは倉庫へ戻る'); }
-  else { centerText('本日の売上　Cr ' + sh.sales + '　（' + sh.soldN + ' 個）', y + 16, '700 16px -apple-system, "Hiragino Sans", sans-serif', COL.scrap); y = button('閉店して戻る', y + 34, () => shopClose(), COL.shop, '売れ残りは倉庫へ戻る。1日進む'); }
+  else { centerText('本日の売上　Cr ' + sh.sales + '　（' + sh.soldN + ' 個）', y + 16, F(16, 700), COL.scrap); y = button('閉店して戻る', y + 34, () => shopClose(), COL.shop, '売れ残りは倉庫へ戻る。1日進む'); }
 }
 function draw() {
   ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, L.w, L.h);
