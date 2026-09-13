@@ -42,7 +42,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p3b-0.1.0';
+const VERSION = 'p3b-0.1.1';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -73,7 +73,7 @@ const TUNE = {
   skills:  { max: 3, overclock: 2 },                                                              // スキルの上限（恒久＝装備の合計はここまで）／パッチで上限を超えられる段数＝オーバークロック（合計 max+overclock まで・要件定義 #22）
   bag:     { base: 10, max: 30, step: 2, price: 30 },                                             // 持ち帰り枠＝初期／安全上限／（旧版で買った枠の増分・値段＝3c-1 で腰の「積載」へ吸収・S.bagBonus に変換）
   goods:   { perRoom: [1, 2], treasure: 3, boss: 3, deepLens: 0.12, deepCore: 0.06 },             // 品の出方＝戦闘部屋クリアで1〜2個（出どころ＝その部屋の敵の型。フロア2以降は deepLens×フロア の確率で光学レンズ・フロア3以降は +deepCore で義体コア）・宝物庫3個・ボス撃破3個（王のコア1個は必ず）
-  shop:    { shelves: 3, stack: 5, customers: 8, interval: 2.6, walkT: 0.9,                                // 店の1日＝棚3・1棚の上限・客の人数・来店の間隔(秒)・歩く時間（3a）
+  shop:    { shelves: 3, stack: 5, custMin: 5, custMax: 12, interval: 2.6, jitter: 0.3, walkT: 0.9,        // 店の1日＝棚3・1棚の上限・客の人数＝開店ごとに custMin〜custMax の乱数（p3b-0.1.1・マスター「来る人にランダム性があり数が変動すると良い」）・来店の間隔(秒)＝±jitter の揺れ・歩く時間
              mood: { init: 1.0, min: 0.5, max: 1.5, drop: 0.06, recover: 0.25 },                           // 3b: 品ごとの「気分」＝天井（基準価格×気分）。売れるたび drop 下がり、出撃1回ごとに recover 戻る（開店では戻らない＝要件定義 R29）。init＝初期値／min・max＝範囲
              price: { min: 0.5, max: 2.0, step: 0.1 },                                                    // 3b: 値付け＝基準価格×倍率（±10%刻み・要件定義 R30）
              bands: { cheap: 0.6, good: 0.85 },                                                            // 3b: 反応の帯＝値÷天井が cheap 以下「安すぎ！」／good 以下「いいね」／1.0 以下「ぎりぎり…」／超「高すぎる」（買わない・R28）
@@ -963,7 +963,7 @@ function mulOf(id) { const m = S.lastMul[marketOf(id)]; return typeof m === 'num
 function priceOf(id, mul) { return Math.max(1, Math.round(GOOD[id].base * mul)); }
 function stepMul(mul, dir) { const P = TUNE.shop.price; return Math.round(Math.min(P.max, Math.max(P.min, mul + dir * P.step)) * 100) / 100; }
 function openShop() {
-  G.shop = { phase: 'setup', shelves: [], pick: null, sel: null, mul: 1, edit: false, custs: [], t: 0, nextT: 1.0, served: 0, sales: 0, soldN: 0, log: [] };
+  G.shop = { phase: 'setup', shelves: [], pick: null, sel: null, mul: 1, edit: false, custs: [], t: 0, nextT: 1.0, served: 0, custN: 0, sales: 0, soldN: 0, log: [] };   // custN＝今日来る客の人数（開店時に決まる）
   for (let i = 0; i < shopShelves(); i++) G.shop.shelves.push(null);
   G.mode = 'shop'; stick.on = false;
 }
@@ -973,7 +973,12 @@ function shelfPut(i, id, mul) {   // 倉庫から棚へ（同じ品を積みの�
   sh.shelves[i] = { id, mul, n, put: n, sold: 0, last: null, price: priceOf(id, mul) }; save(); SFX.pick(); return true;
 }
 function shelfClear(i) { const sh = G.shop, s = sh.shelves[i]; if (!s) return; S.warehouse[s.id] = (S.warehouse[s.id] | 0) + s.n; sh.shelves[i] = null; save(); }
-function shopOpen() { const sh = G.shop; if (!sh.shelves.some(s => s && s.n > 0)) { SFX.deny(); return false; } sh.phase = 'open'; sh.t = 0; sh.nextT = 0.6; SFX.door(); return true; }
+function shopOpen() {   // 開店＝今日の客の人数を乱数で決める（p3b-0.1.1）。多い日・鈍い日は記録に1行
+  const sh = G.shop; if (!sh.shelves.some(s => s && s.n > 0)) { SFX.deny(); return false; }
+  const C = TUNE.shop; sh.custN = C.custMin + Math.floor(Math.random() * (C.custMax - C.custMin + 1)); sh.phase = 'open'; sh.t = 0; sh.nextT = 0.6; sh.log = [];
+  if (sh.custN >= C.custMax - 1) sh.log.unshift('今日は客が多い'); else if (sh.custN <= C.custMin + 1) sh.log.unshift('今日は客足が鈍い');
+  SFX.door(); return true;
+}
 function shopFinish() { const sh = G.shop; if (!sh || sh.phase !== 'open') return false; sh.phase = 'done'; sh.custs = []; SFX.clear(); return true; }   // 客を止めて閉店時の記録へ（早じまいも同じ）
 function shopRecords() { const sh = G.shop; return sh ? sh.shelves.filter(s => s).map(s => ({ id: s.id, mul: s.mul, price: s.price, put: s.put, sold: s.sold, last: s.last })) : []; }   // 閉店時の記録（R28）＝棚ごと
 function shopClose() {   // 売れ残りは倉庫へ戻す。日は進まない（3b・R29＝日は出撃の回数）
@@ -996,8 +1001,8 @@ function shopStocked() { return G.shop.shelves.filter(s => s && s.n > 0); }
 function updateShop(dt) {
   const sh = G.shop; if (!sh || sh.phase !== 'open') return;
   sh.t += dt; sh.nextT -= dt;
-  if (sh.nextT <= 0 && sh.served < TUNE.shop.customers) {   // 来店
-    sh.served++; sh.nextT = TUNE.shop.interval;
+  if (sh.nextT <= 0 && sh.served < sh.custN) {   // 来店（間隔は ±jitter で揺れる）
+    sh.served++; sh.nextT = TUNE.shop.interval * (1 + (Math.random() * 2 - 1) * TUNE.shop.jitter);
     const stocked = shopStocked(); const target = stocked.length ? sh.shelves.indexOf(stocked[Math.floor(Math.random() * stocked.length)]) : -1;
     sh.custs.push({ i: target, t: 0, st: 'walk', text: null, col: COL.text });
   }
@@ -1016,7 +1021,7 @@ function updateShop(dt) {
     else if (c.st === 'react' && c.t >= 1.1) { c.st = 'leave'; c.t = 0; }
     else if (c.st === 'leave' && c.t >= 0.6) sh.custs.splice(k, 1);
   }
-  if (sh.served >= TUNE.shop.customers && sh.custs.length === 0) { sh.phase = 'done'; SFX.clear(); }
+  if (sh.served >= sh.custN && sh.custs.length === 0) { sh.phase = 'done'; SFX.clear(); }
 }
 // ---------- 輪転機＝刷る（3b・#15・R31）＝設計図から複製を刷る。複製は売り物専用（工房の材料に数えない）。1部あたりスクラップを使う ----------
 function printMax(id) { return Math.max(0, Math.min(S.prints[id] | 0, Math.floor(S.scrapBank / TUNE.print.scrapPer))); }   // 今刷れる最大部数＝版の残りとスクラップの少ない方
@@ -1563,7 +1568,7 @@ function drawShop(cy) {   // 店の1日（3b）＝上に棚（3〜5）、中に�
     shopRecords().forEach(r => { const g = GOOD[r.id]; const t = g.ch + ' ' + g.name + '　Cr ' + r.price + '（×' + r.mul.toFixed(1) + '）　売れた ' + r.sold + '/' + r.put + '　最後＝' + (r.last || '客が来なかった'); ctx.fillStyle = r.sold >= r.put ? COL.scrap : r.sold === 0 ? COL.doorClosed : COL.text; ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, ry); ry += FS(14); });
     const hint = '「高すぎる」は天井の上。売れるほど天井は下がり、出撃で戻る'; ctx.fillStyle = COL.mut; ctx.font = fitFont(F(10, 500), hint, w - 16); ctx.fillText(hint, x0 + 8, ry + 2);
   } else { ctx.fillStyle = COL.mut; sh.log.slice(0, 4).forEach((t, i) => { ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, fy + fh - FS(66) + i * FS(14)); }); }
-  ctx.textAlign = 'right'; ctx.fillStyle = COL.mut; ctx.font = F(11, 500); ctx.fillText(sh.phase === 'setup' ? '棚をタップして品を置く' : sh.phase === 'open' ? '客 ' + sh.served + '/' + TUNE.shop.customers : '閉店', x0 + w - 8, fy + 16);
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.mut; ctx.font = F(11, 500); ctx.fillText(sh.phase === 'setup' ? '棚をタップして品を置く' : sh.phase === 'open' ? '客 ' + sh.served + '/' + sh.custN : '閉店', x0 + w - 8, fy + 16);
   // 下のボタン／品の選択／値付け
   let y = L.h - L.sab - 180 - ((sh.phase === 'setup' && sh.pick === null) ? shift : 0);
   if (sh.phase === 'setup' && sh.pick !== null) {
@@ -1588,7 +1593,7 @@ function drawShop(cy) {   // 店の1日（3b）＝上に棚（3〜5）、中に�
     return;
   }
   if (sh.phase === 'setup') {
-    y = button('開店', y, () => shopOpen(), shopStocked().length ? COL.shop : null, shopStocked().length ? '客が ' + TUNE.shop.customers + ' 人来る。棚をタップで値を変える／倉庫へ戻す' : '棚に品を置いてから');
+    y = button('開店', y, () => shopOpen(), shopStocked().length ? COL.shop : null, shopStocked().length ? '客が ' + TUNE.shop.custMin + '〜' + TUNE.shop.custMax + ' 人来る（日による）。棚をタップで値を変える／戻す' : '棚に品を置いてから');
     const ex = TUNE.shop.expand[S.shopLv]; if (ex) y = button('店を広げる（段階' + (S.shopLv + 1) + '）Cr ' + ex.cr, y, () => shopExpand(), S.money >= ex.cr ? COL.portal : null, '棚 ' + ex.shelves + '・1棚 ' + ex.stack + ' 個まで');
     y = button('戻る', y, () => shopClose());
   }
