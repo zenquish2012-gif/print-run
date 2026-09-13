@@ -38,7 +38,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p53-0.1.0';
+const VERSION = 'p53-0.1.1';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -1266,7 +1266,7 @@ function drawHUD() {
   if (S.meter) { ctx.fillText('js ' + M.avg.toFixed(1) + 'ms  max ' + M.max.toFixed(1) + 'ms  ' + M.fps + 'fps  e' + enemies.length + ' b' + bullets.length + ' p' + parts.length, 14, L.h - L.sab - 30); ctx.fillText('seed ' + G.seed.toString(16) + '  ' + (G.room ? 'tpl' + G.room.tpl + ' ' + G.room.type : '') + '  sa ' + L.satRaw + '/' + L.sabRaw + '→' + L.sat + '/' + L.sab + '  win ' + L.w + 'x' + L.h + (isStandalone() ? ' sa-mode' : ''), 14, L.h - L.sab - 17); }
   ctx.fillText(VERSION, 14, L.h - L.sab - 5);
   // バナー
-  if (G.banner && (G.mode === 'run' || G.mode === 'home')) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); ctx.fillStyle = COL.text; ctx.font = F(22, 700); ctx.textAlign = 'center'; ctx.fillText(G.banner.text, L.w / 2, L.oy + 100); ctx.globalAlpha = 1; }   // 部屋の上寄り（上帯の直下に置くと北の扉の看板と重なる）
+  if (G.banner && (G.mode === 'run' || G.mode === 'home')) { const a = Math.min(1, G.banner.t / 0.3, (G.banner.max - G.banner.t) / 0.15 + 0.2); ctx.globalAlpha = Math.max(0, Math.min(1, a)); wrapText(G.banner.text, L.w / 2, L.oy + 100, L.w - 24, FS(26), F(22, 700), COL.text); ctx.globalAlpha = 1; }   // p53-0.1.1: 長いバナー（帰還時のハンの一言）は2行に折る（1行だと画面幅を超えて切れる＝実機で指摘）。部屋の上寄り（上帯の直下に置くと北の扉の看板と重なる）
 }
 function overlay(alpha) { ctx.fillStyle = 'rgba(5,8,16,' + alpha + ')'; ctx.fillRect(0, 0, L.w, L.h); }
 function centerText(text, y, font, col, alpha, maxW) { ctx.globalAlpha = alpha == null ? 1 : alpha; ctx.fillStyle = col || COL.text; ctx.font = fitFont(font, text, maxW == null ? L.w - 24 : maxW); ctx.textAlign = 'center'; ctx.fillText(text, L.w / 2, y); ctx.globalAlpha = 1; }   // maxW＝既定は画面幅−24（p53＝長い1行は縮めて収める）
