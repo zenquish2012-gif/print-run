@@ -26,7 +26,9 @@
 <script>
 'use strict';
 /* =====================================================================
-   PRINT RUN ―弾丸輪廻―  Phase 3c-1 ビルドの骨（p3c1）＝MH Wilds型ビルドシステムの骨（要件定義 #20〜#27・R10〜R20）
+   PRINT RUN ―弾丸輪廻―  Phase 5-0 画像パイプラインの実測（p50）＝主人公と突進型を Gemini 生成のドット絵（img/hero.png・img/rusher.png＝64×64透過）に差し替え
+   （体は左右2方向＝右向きの絵を反転・銃＝照準線だけ360°回る／足元の影はゲーム側／画像が読めなければ従来の図形＝ゲームの中身は 3c-1 のまま）
+   Phase 3c-1 ビルドの骨（p3c1）＝MH Wilds型ビルドシステムの骨（要件定義 #20〜#27・R10〜R20）
    Phase 3a（拠点＝印刷所・品・持ち帰り枠・倉庫・店の1日・金・工房＝銃4種・住人・帰る/進む・死亡ロスト・書き出し/読み込み）の上に、
    スキル表1本（SKILLS＝義体スキル11＋銃スキル5。恒久＝装備の土台Lv／パッチ＝ラン中だけ+Lv・上限超え＝オーバークロック）／
    義体5部位（頭・胴・腕・腰・脚＝仕組みのダイヤル）×3段（標準・街路型・王型）＝型（GEAR）を素材（＝品）と金で「焼き込む」／
@@ -34,7 +36,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p3c1-0.1.0';
+const VERSION = 'p50-0.1.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -49,6 +51,7 @@ const TUNE = {
   rusher:  { hp: 4, spd: 95, tellDist: 200, tellT: 0.45, dashSpd: 520, dashT: 0.4, restT: 0.75 }, // 突進型: 予兆に入る距離／予兆(秒)／突進速度・時間／硬直
   shooter: { hp: 2, spd: 70, near: 130, far: 300, aimT: 0.55, lockT: 0.18, bulletSpd: 230, coolT: 1.1, nearMax: 0.6 }, // 射撃型: 近すぎ→下がる（nearMax 秒以上続いたら至近で撃つ）／狙い(秒)／照準ロック(残り秒)／弾速／再装填
   room:    { bonusFrom: 3, spawnDist: 170 },                                                      // 3部屋目以降は敵+1／主人公からの最短出現距離
+  sprite:  { on: true, scale: 1, faceHys: 0.2, shadow: 0.28 },                                    // Phase 5-0: 画像（64×64ドット）を使うか／1ドット＝何px／左右の向きを変える閾値（cos）／足元の影の濃さ。画像が読めなければ図形で描く
   // フロアごとの差分（Phase 2）。rooms＝部屋数の範囲／room＝1部屋の敵＝base+0..rand-1（上限max）／hp＝敵HPの加算。フロア1は Phase 1 と同じ値（難度はマスター判断で据え置き）
   floors: [
     { rooms: [7, 9],   room: { base: 3, rand: 3, max: 6 }, hp: 0 },
@@ -250,6 +253,24 @@ const SFX = {
 
 // ---------- 画面レイアウト ----------
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+// ---------- スプライト画像（Phase 5-0）----------
+// Gemini 生成→ _script_sprite.py で透過 64×64 ドットにした PNG。読めない間（初回のオフライン等）は従来の図形で描く。
+// 向き＝体は左右2方向（右向きの絵を反転）・銃（照準線）だけ360°回る（05_画像生成 §2 の仮決め）。
+const IMG = {};
+const IMG_FILES = { hero: 'img/hero.png', rusher: 'img/rusher.png' };
+function whiteMask(im) { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const x = c.getContext('2d'); x.drawImage(im, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height); return c; }   // 被弾・予兆の白点滅用（同じ形の白いシルエット）
+function loadSprites() { for (const k in IMG_FILES) { const im = new Image(); im.onload = () => { IMG[k] = { im, w: im.width, h: im.height, white: whiteMask(im) }; }; im.onerror = () => { IMG[k] = null; }; im.src = IMG_FILES[k] + '?v=' + VERSION; } }
+function drawSprite(k, x, y, faceLeft, white, alpha) {
+  const s = TUNE.sprite.on && IMG[k]; if (!s) return false;
+  const sc = TUNE.sprite.scale, w = s.w * sc, h = s.h * sc;
+  ctx.save(); ctx.imageSmoothingEnabled = false; if (alpha !== undefined) ctx.globalAlpha = alpha;
+  ctx.translate(x, y); if (faceLeft) ctx.scale(-1, 1);
+  ctx.drawImage(white ? s.white : s.im, -w / 2, -h / 2, w, h);
+  ctx.restore(); return true;
+}
+function faceLeft(o, ang) { const c = Math.cos(ang); if (c < -TUNE.sprite.faceHys) o.fl = true; else if (c > TUNE.sprite.faceHys) o.fl = false; return !!o.fl; }   // 真上・真下を向いている間は直前の向きを保つ（ちらつき防止）
+function drawShadow(x, y, rx, ry) { ctx.fillStyle = '#000'; ctx.globalAlpha = TUNE.sprite.shadow; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }   // 足元の影＝絵には描かない（プロンプトで禁止）のでゲーム側で置く
+
 const stat = document.createElement('canvas');                    // 部屋の静的レイヤー（床＋壁）＝部屋に入った時だけ描く
 const L = { w: 0, h: 0, dpr: 1, sat: 0, sab: 0, satRaw: 0, sabRaw: 0, s: 1, ox: 0, oy: 0, topH: 0, botH: 0 };
 function isStandalone() { return !!navigator.standalone || matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches; }
@@ -1043,10 +1064,18 @@ function drawEnemy(e) {
   const col = e.type === 'rusher' ? COL.rusher : COL.shooter;
   if (e.st === 'spawn') { const k = 1 - Math.max(0, e.t) / 0.9; ctx.strokeStyle = col; ctx.globalAlpha = 0.3 + 0.6 * k; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(e.x, e.y, e.r + (1 - k) * 22, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; return; }
   if (e.type === 'shooter' && e.st === 'aim') { const k = Math.max(0, 1 - e.t / (TUNE.shooter.aimT * D.tellK)); ctx.strokeStyle = COL.shooter; ctx.globalAlpha = 0.25 + 0.6 * k; ctx.lineWidth = e.t <= TUNE.shooter.lockT ? 2.5 : 1; if (e.t > TUNE.shooter.lockT) ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.ax, e.ay); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
-  if (e.type === 'rusher' && e.st === 'dash') { ctx.globalAlpha = 0.25; ctx.fillStyle = col; tri(e.x - e.dx * 14, e.y - e.dy * 14, e.r, e.face); ctx.fill(); ctx.globalAlpha = 0.12; tri(e.x - e.dx * 28, e.y - e.dy * 28, e.r, e.face); ctx.fill(); ctx.globalAlpha = 1; }
   const flash = e.flash > 0 || (e.st === 'tell' && Math.floor(e.t * 16) % 2 === 0);
-  ctx.fillStyle = flash ? COL.white : col;
-  if (e.type === 'rusher') { tri(e.x, e.y, e.r + 2, e.face); ctx.fill(); } else { dia(e.x, e.y, e.r + 1); ctx.fill(); ctx.fillStyle = '#0b0f1a'; dia(e.x, e.y, 4); ctx.fill(); }
+  if (e.type === 'rusher') {
+    // Phase 5-0: 突進型＝画像（右向きの絵・左へ向く時は反転）。残像も同じ絵。画像が無ければ従来の三角形
+    const fl = faceLeft(e, e.face), hasImg = TUNE.sprite.on && !!IMG.rusher;
+    if (e.st === 'dash') {
+      if (!drawSprite('rusher', e.x - e.dx * 14, e.y - e.dy * 14, fl, false, 0.25)) { ctx.globalAlpha = 0.25; ctx.fillStyle = col; tri(e.x - e.dx * 14, e.y - e.dy * 14, e.r, e.face); ctx.fill(); }
+      if (!drawSprite('rusher', e.x - e.dx * 28, e.y - e.dy * 28, fl, false, 0.12)) { ctx.globalAlpha = 0.12; ctx.fillStyle = col; tri(e.x - e.dx * 28, e.y - e.dy * 28, e.r, e.face); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
+    if (hasImg) drawShadow(e.x, e.y + 11 * TUNE.sprite.scale, 18 * TUNE.sprite.scale, 4 * TUNE.sprite.scale);
+    if (!drawSprite('rusher', e.x, e.y, fl, flash)) { ctx.fillStyle = flash ? COL.white : col; tri(e.x, e.y, e.r + 2, e.face); ctx.fill(); }
+  } else { ctx.fillStyle = flash ? COL.white : col; dia(e.x, e.y, e.r + 1); ctx.fill(); ctx.fillStyle = '#0b0f1a'; dia(e.x, e.y, 4); ctx.fill(); }
   if (e.st === 'tell') { ctx.fillStyle = COL.white; ctx.font = '700 14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', e.x, e.y - e.r - 6); }
   if (e.hp < e.maxHp) { ctx.fillStyle = '#000'; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24, 3); ctx.fillStyle = col; ctx.fillRect(e.x - 12, e.y + e.r + 4, 24 * e.hp / e.maxHp, 3); }
 }
@@ -1077,9 +1106,13 @@ function drawPlayer() {
   if (!player.alive || G.mode === 'title') return;
   if (player.inv > 0 && Math.floor(player.inv * 12) % 2 === 0) return;
   if (G.aim) { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.35; ctx.lineWidth = 1; ctx.setLineDash([5, 7]); ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(G.aim.x, G.aim.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(G.aim.x, G.aim.y, G.aim.r + 6, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
-  ctx.globalAlpha = 0.18; ctx.fillStyle = COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 6, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1;
-  ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill();
-  ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * 6, player.y + Math.sin(player.ang) * 6); ctx.lineTo(player.x + Math.cos(player.ang) * 18, player.y + Math.sin(player.ang) * 18); ctx.stroke();
+  // Phase 5-0: 主人公＝画像（体は左右2方向＝右向きの絵を反転／銃＝照準線だけ360°回る）。画像が無ければ従来の円
+  const sc = TUNE.sprite.scale, hasImg = TUNE.sprite.on && !!IMG.hero;
+  if (hasImg) drawShadow(player.x, player.y + 22 * sc, 9 * sc, 3 * sc);
+  else { ctx.globalAlpha = 0.18; ctx.fillStyle = COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 6, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
+  if (!drawSprite('hero', player.x, player.y, faceLeft(player, player.ang), player.flash > 0)) { ctx.fillStyle = player.flash > 0 ? COL.white : COL.player; ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 6.2832); ctx.fill(); }
+  const g0 = hasImg ? 8 : 6, g1 = hasImg ? 24 : 18;   // 銃（照準線）＝絵の体からはみ出す長さ
+  ctx.strokeStyle = COL.white; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(player.x + Math.cos(player.ang) * g0, player.y + Math.sin(player.ang) * g0); ctx.lineTo(player.x + Math.cos(player.ang) * g1, player.y + Math.sin(player.ang) * g1); ctx.stroke();
   if (!player.moving && G.mode === 'run') { ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 3, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1; }
   if (player.dashCool > 0 && player.dashT <= 0) { const k = 1 - player.dashCool / (TUNE.dash.t + D.dashCool); ctx.strokeStyle = COL.white; ctx.globalAlpha = 0.45; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, player.r + 8, -Math.PI / 2, -Math.PI / 2 + 6.2832 * k); ctx.stroke(); ctx.globalAlpha = 1; }   // ダッシュ再使用までのリング
 }
@@ -1184,7 +1217,7 @@ function drawOverlays() {
     centerText('死ぬと品だけ失う。スクラップ・義体・銃・型は残る', y + 50, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('フロアの出口で「帰る／進む」を選べる', y + 66, '500 11px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
     centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　売上 Cr ' + S.earned, y + 90, '500 12px -apple-system, "Hiragino Sans", sans-serif', COL.mut);
-    centerText(VERSION + '  Phase 3c-1 ビルドの骨（義体5部位・スキル表・焼き込む）', y + 110, '500 11px Menlo, monospace', COL.mut);
+    centerText(VERSION + '  Phase 5-0 画像の実測（主人公・突進型＝Gemini生成ドット絵）＋3c-1 ビルドの骨', y + 110, '500 11px Menlo, monospace', COL.mut);
   } else if (G.mode === 'pause') {
     overlay(0.7); centerText('一時停止', cy - 190, '700 26px -apple-system, "Hiragino Sans", sans-serif');
     let y = cy - 150;
@@ -1427,10 +1460,10 @@ const PR = window.PR = { get G() { return G; }, player, get enemies() { return e
   setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { while (enemies.length) killEnemy(enemies.length - 1); },
   step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else if (G.mode === 'home') updateHome(1 / 60); else if (G.mode === 'shop') updateShop(1 / 60); else updateFx(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom,
   GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; },
-  SKILLS, SLOTS, GEAR, GEARM, FRAMES, FRAME, lv, permLv, patchLv, canPatch, computePerm, bagCap, craftGear, equipGear, forgeGun, awardMold, roomGoods, treasureGoods, bossGoods, exitInfo, missingFor, permList, migrateS, spawnEnemies };
+  SKILLS, SLOTS, GEAR, GEARM, FRAMES, FRAME, lv, permLv, patchLv, canPatch, computePerm, bagCap, craftGear, equipGear, forgeGun, awardMold, roomGoods, treasureGoods, bossGoods, exitInfo, missingFor, permList, migrateS, spawnEnemies, IMG, IMG_FILES, loadSprites, drawSprite };
 
 // ---------- 起動 ----------
-layout();
+layout(); loadSprites();
 if (!G.tiles) { /* タイトル背景＝印刷所 */ G.room = HOME_ROOM; G.tiles = homeTiles(); G.open = true; renderStatic(); }
 G.saved = loadRun();
 requestAnimationFrame(frame);
