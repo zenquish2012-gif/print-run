@@ -1,7 +1,7 @@
 // PRINT RUN Service Worker（オフライン起動用）
 // 方針: ページ本体（index.html）はネットワーク優先・失敗時はキャッシュ／それ以外はキャッシュ優先。
 // 版が上がったら CACHE 名を変える（古いキャッシュは activate で削除）。
-const CACHE = 'pr-p53-0.1.1';
+const CACHE = 'pr-p3b-0.1.0';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './img/hero.png', './img/rusher.png', './img/hero_run.png', './img/rusher_run.png', './img/guns.png'];   // Phase 5-0/5-1: スプライト画像もオフライン用に先読み
 
 self.addEventListener('install', (e) => {

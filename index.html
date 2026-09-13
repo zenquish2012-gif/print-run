@@ -26,6 +26,10 @@
 <script>
 'use strict';
 /* =====================================================================
+   PRINT RUN ―弾丸輪廻―  Phase 3b 店の見直し（p3b・要件定義 #31〜#36・R27〜R32）＝「何度も開店すればいつかは売れる」を消す
+   ＝買う判定は確率でなく「隠れた天井」（基準価格×その品の気分）＝天井以下なら買う・超えたら誰も買わない（R27）／反応4段の言葉＋閉店時の記録（R28）／
+   気分＝売れるたび下がり、出撃1回ごとに戻る＝開店では戻らない＝日は出撃の回数（R29・R7改定）／値付け＝±10%刻み・品ごとに前回の値を覚える（R30）／
+   輪転機で「刷る」＝設計図（宝物庫・ボスで拾う恒久物）から複製を刷る＝複製は売り物専用（焼き込めない）・設計図には版の寿命（R31）／店拡張 段階1〜2（棚4／棚5＋積み8・#36）／保存 v4（R32）
    PRINT RUN ―弾丸輪廻―  Phase 5-1 キャラの動き（p51・要件定義 #28〜#30・R21〜R26）＝走り4コマのシート（img/hero_run.png・img/rusher_run.png）＋銃4丁（img/guns.png・体と別画像で360°回転・左向きは上下反転）
    ＋手続き型（待機の呼吸・ダッシュの伸び・予兆の沈み込み・足元の砂煙・死亡は倒れる）。画像が無ければ従来の図形。ゲームの中身は 3c-1 のまま。
    Phase 5-0 画像パイプラインの実測（p50）＝主人公と突進型を Gemini 生成のドット絵（img/hero.png・img/rusher.png＝64×64透過）に差し替え
@@ -38,7 +42,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p53-0.1.1';
+const VERSION = 'p3b-0.1.0';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -69,7 +73,12 @@ const TUNE = {
   skills:  { max: 3, overclock: 2 },                                                              // スキルの上限（恒久＝装備の合計はここまで）／パッチで上限を超えられる段数＝オーバークロック（合計 max+overclock まで・要件定義 #22）
   bag:     { base: 10, max: 30, step: 2, price: 30 },                                             // 持ち帰り枠＝初期／安全上限／（旧版で買った枠の増分・値段＝3c-1 で腰の「積載」へ吸収・S.bagBonus に変換）
   goods:   { perRoom: [1, 2], treasure: 3, boss: 3, deepLens: 0.12, deepCore: 0.06 },             // 品の出方＝戦闘部屋クリアで1〜2個（出どころ＝その部屋の敵の型。フロア2以降は deepLens×フロア の確率で光学レンズ・フロア3以降は +deepCore で義体コア）・宝物庫3個・ボス撃破3個（王のコア1個は必ず）
-  shop:    { shelves: 3, stack: 5, customers: 8, interval: 2.6, walkT: 0.9, tiers: { low: { k: 0.7, p: 1.0, label: '安' }, mid: { k: 1.0, p: 0.8, label: '適' }, high: { k: 1.4, p: 0.4, label: '高' } } },   // 店の1日＝棚3・1棚の上限・客の人数・来店の間隔(秒)・歩く時間・値付け3段階（価格倍率・買う確率）
+  shop:    { shelves: 3, stack: 5, customers: 8, interval: 2.6, walkT: 0.9,                                // 店の1日＝棚3・1棚の上限・客の人数・来店の間隔(秒)・歩く時間（3a）
+             mood: { init: 1.0, min: 0.5, max: 1.5, drop: 0.06, recover: 0.25 },                           // 3b: 品ごとの「気分」＝天井（基準価格×気分）。売れるたび drop 下がり、出撃1回ごとに recover 戻る（開店では戻らない＝要件定義 R29）。init＝初期値／min・max＝範囲
+             price: { min: 0.5, max: 2.0, step: 0.1 },                                                    // 3b: 値付け＝基準価格×倍率（±10%刻み・要件定義 R30）
+             bands: { cheap: 0.6, good: 0.85 },                                                            // 3b: 反応の帯＝値÷天井が cheap 以下「安すぎ！」／good 以下「いいね」／1.0 以下「ぎりぎり…」／超「高すぎる」（買わない・R28）
+             expand: [{ shelves: 4, stack: 5, cr: 100 }, { shelves: 5, stack: 8, cr: 200 }] },            // 3b: 店拡張 段階1〜2（#36）＝棚4／棚5＋積み8
+  print:   { life: 12, scrapPer: 2, treasure: 0.25, treasureKinds: ['lens', 'lens', 'core', 'cell'], bossKinds: ['king', 'core'] },   // 3b: 刷る（R31）＝設計図1枚の版の寿命（部）／1部あたりのスクラップ／宝物庫で設計図が出る確率と種類／ボスは1枚確定
 };
 const COL = {
   bg: '#0b0f1a', floor: '#121c33', grid: '#1a2742', wall: '#24335a', wallEdge: '#4a6ab0',
@@ -149,6 +158,12 @@ const GOODS = [
   { id: 'king', ch: '王', name: '王のコア',   base: 60, col: '#ff6b6b', src: 'ボスのみ' },
 ];
 const GOOD = {}; for (const g of GOODS) GOOD[g.id] = g;
+// 3b: 複製（刷り物）＝設計図から刷った品。売り物専用＝工房の材料に数えない（要件定義 #35・R31）。市場（気分）は元の品と共有＝mk。設計図（bp_*）＝袋の枠を使うが死んでも残る恒久物（#17・R2）
+const COPIES = GOODS.map(g => ({ id: g.id + '_p', ch: g.ch, name: g.name + '〈複製〉', base: g.base, col: g.col, src: '設計図から刷る', copy: true, mk: g.id }));
+const PRINTS = GOODS.map(g => ({ id: 'bp_' + g.id, ch: '図', name: g.name + 'の設計図', base: 0, col: g.col, src: '宝物庫・ボス', print: true, mk: g.id }));   // 色＝元の品と同じ（何の設計図かが色で分かる）
+for (const g of COPIES) GOOD[g.id] = g; for (const g of PRINTS) GOOD[g.id] = g;
+function marketOf(id) { const g = GOOD[id]; return g && g.mk ? g.mk : id; }   // 気分を持つ品id（複製・設計図→元の品）
+function isPerm(id) { const g = GOOD[id]; return !!(g && g.print); }         // 恒久物（袋にあっても死んで残る）
 // 銃（恒久装備・Phase 3a）＝工房で買い、出撃時に1丁選ぶ。挙動の違い＝連射間隔／同時弾数／拡散(rad)／1発の威力／射程／弾速／バースト数と間隔。⚠️射程は300以上にする＝射撃型は300で足を止めて撃つため、射程が短い銃は止まって撃つ主人公が手詰まりになる（PC棒立ち実測＝射程230で死亡26/48）。近距離向きの性格は拡散（遠いと散る）で出す
 // 3c-1＝銃は基礎値（この表）＋銃スキルの器。sig＝性格スキル（段1を焼き込むと +1）・cost1/cr1＝段1の素材と金。派生分岐は 3c-2
 const GUNS = [
@@ -199,7 +214,7 @@ function floorRng(seed, fi) { return mulberry32((seed + Math.imul(fi + 1, 0x9E37
 // ---------- 保存（設定＋通算／ラン中）----------
 const SAVE_KEY = 'printrun.p1', RUN_KEY = 'printrun.run';
 function defaultS() { return { v: 0, sound: true, meter: true, dashInput: 'flick', runs: 0, kills: 0, clears: 0, bestRooms: 0, wins: 0, bestFloor: 0, scrapBank: 0,
-  money: 0, day: 1, bagMax: TUNE.bag.base, bagBonus: 0, warehouse: {}, guns: ['hand'], gun: 'hand', gunLv: {}, gear: null, owned: [], molds: null, frame: 'std', npcIdx: 0, lastRun: null, sold: 0, earned: 0 }; }   // v は 0 で始め migrateS が 3 にする＝旧保存（v 無し）を必ず変換に通す
+  money: 0, day: 1, bagMax: TUNE.bag.base, bagBonus: 0, warehouse: {}, guns: ['hand'], gun: 'hand', gunLv: {}, gear: null, owned: [], molds: null, frame: 'std', npcIdx: 0, lastRun: null, sold: 0, earned: 0, mood: {}, prints: {}, lastMul: {}, shopLv: 0 }; }   // v は 0 で始め migrateS が 4 にする＝旧保存（v 無し）を必ず変換に通す。3b: mood＝品ごとの気分／prints＝設計図（品id→版の残り部数）／lastMul＝前回の値付け倍率／shopLv＝店拡張の段階
 let S = defaultS();   // dashInput: 'tap' | 'flick' | 'both'（既定はフリック）／scrapBank＝倉庫のスクラップ／money＝金(Cr)／warehouse＝倉庫の品（id→個数）／guns＝持っている銃／gun＝出撃に持つ銃／gunLv＝銃の段（0/1）／gear＝部位→装備中の型id／owned＝焼き込んだ型／molds＝持っている型（設計図）／frame＝素体／bagBonus＝旧版（p3a）で買った枠の増分／npcIdx＝住人の行の進み
 try { const j = localStorage.getItem(SAVE_KEY); if (j) S = Object.assign(defaultS(), JSON.parse(j)); } catch (e) { }
 function migrateS() {   // 旧版（p2／p3a＝v2以前）の保存からの移行（R19）。枠の購入分は bagBonus へ、装備は標準、街路型の型は最初から持つ
@@ -211,6 +226,12 @@ function migrateS() {   // 旧版（p2／p3a＝v2以前）の保存からの移�
   if (!Array.isArray(S.molds)) S.molds = []; S.molds = S.molds.filter(id => GEARM[id]); for (const g of GEAR) if (g.tier === 1 && !S.molds.includes(g.id)) S.molds.push(g.id);
   for (const sl of SLOTS) { const g = GEARM[S.gear[sl.id]]; if (g.tier > 0 && !S.owned.includes(g.id)) S.gear[sl.id] = sl.id + '0'; }   // 持っていない型を装備していたら標準へ
   if (!FRAMEM[S.frame]) S.frame = 'std'; S.bagBonus = Math.max(0, S.bagBonus | 0);
+  // 3b（v4・R32）: 気分・設計図・前回の値・店の段階。旧データ（v3）は既定で埋める。倉庫に今の品表に無いidが残っていたら捨てる
+  if (!S.mood || typeof S.mood !== 'object') S.mood = {}; if (!S.prints || typeof S.prints !== 'object') S.prints = {}; if (!S.lastMul || typeof S.lastMul !== 'object') S.lastMul = {};
+  for (const k in S.warehouse) if (!GOOD[k] || GOOD[k].print || !(S.warehouse[k] | 0)) delete S.warehouse[k];
+  for (const k in S.prints) if (!GOOD[k] || GOOD[k].mk || !(S.prints[k] | 0)) delete S.prints[k];
+  S.shopLv = Math.max(0, Math.min(TUNE.shop.expand.length, S.shopLv | 0));
+  if (!(S.v >= 4)) S.v = 4;
 }
 migrateS();
 function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { } }
@@ -354,7 +375,7 @@ const G = { mode: 'title', seed: 0, floorIdx: 0, floor: null, room: null, tiles:
   kills: 0, time: 0, banner: null, shake: 0, portal: null, aim: null, overlayT: 0, roomsVisited: 0, deadT: 0,
   parts: {}, scrap: 0, nanoCnt: 0, pickups: [], peds: [], floats: [], choice: null, saved: null, boss: null, runScrapStart: 0,
   bag: [], bagMax: TUNE.bag.base, gun: GUNS[0], swap: null, shop: null, home: false, data: null, exitAsk: false, goodsGot: 0,
-  perm: {}, forge: null, roomMix: null };   // Phase 3a: bag＝持ち帰り枠の中身（品idの列）／gun＝今の銃／swap＝入れ替え画面／shop＝店の1日／home＝拠点にいる。3c-1: perm＝恒久のスキルLv（装備＋銃の段から computePerm で作る）／forge＝工房で開いている部位／roomMix＝今の部屋の敵の型の内訳（品の出どころ）
+  perm: {}, forge: null, roomMix: null, print: null };   // 3b: print＝輪転機（刷る）画面の状態。Phase 3a: bag＝持ち帰り枠の中身（品idの列）／gun＝今の銃／swap＝入れ替え画面／shop＝店の1日／home＝拠点にいる。3c-1: perm＝恒久のスキルLv（装備＋銃の段から computePerm で作る）／forge＝工房で開いている部位／roomMix＝今の部屋の敵の型の内訳（品の出どころ）
 const player = { x: RW / 2, y: RH / 2, r: 11, hp: TUNE.player.hp, maxHp: TUNE.player.hp, inv: 0, ang: -Math.PI / 2, fireT: 0, alive: true, spd: TUNE.player.spd, moving: false, flash: 0, dashT: 0, dashCool: 0, ddx: 0, ddy: 0, burstN: 0, burstT: 0, kickT: 0 };   // kickT＝反動の残り秒（p52）
 const D = { spd: 0, fireRate: 0, dmg: 1, pierce: 0, multi: 0, range: 0, bulletSpd: 0, dashCool: 0, inv: 0, spread: 1, tellK: 1, magnet: 70, bag: TUNE.bag.base };   // スキルを反映した現在値（recompute で作る）
 let enemies = [], bullets = [], parts = [];
@@ -534,9 +555,9 @@ function newRun() {
 }
 // 印刷所へ帰る（kind: 'exit'＝出口で帰る／'win'＝ボス撃破／'dead'＝刷り直し）。品は生きて帰った時だけ倉庫へ、スクラップ・型（銃・枠）は必ず残る（要件定義 #17）
 function returnHome(kind) {
-  const goods = G.bag.slice(); const lost = kind === 'dead' ? goods : [];
+  const goods = G.bag.filter(id => !isPerm(id)); const lost = kind === 'dead' ? goods : [];   // 設計図（恒久物）は拾った時点で保存済み＝袋から数えない
   if (kind !== 'dead') for (const id of goods) S.warehouse[id] = (S.warehouse[id] || 0) + 1;
-  S.scrapBank += G.scrap; S.day++; S.npcIdx = (S.npcIdx || 0) + 1;
+  S.scrapBank += G.scrap; S.day++; S.npcIdx = (S.npcIdx || 0) + 1; recoverMood();   // 3b: 日＝出撃の回数（開店では進まない・R29）／気分は出撃1回ごとに戻る（帰還・死亡とも）
   S.lastRun = { kind, floor: G.floorIdx + 1, kills: G.kills, goods: kind === 'dead' ? 0 : goods.length, lost: lost.length, scrap: G.scrap, time: Math.floor(G.time), at: Date.now() };
   save(); clearRun(); G.bag = []; G.scrap = 0; enterHome();
   banner(NPC.name + '「' + npcLine().slice(0, 14) + '…」', 2.2);
@@ -630,8 +651,9 @@ function roomGoods(n) {
   }
   return out;
 }
-function treasureGoods(n) { const out = []; for (let i = 0; i < n; i++) { const r = Math.random(); out.push(r < 0.6 ? 'lens' : r < 0.9 ? 'core' : 'chip'); } return out; }
-function bossGoods(n) { const out = ['king']; for (let i = 1; i < n; i++) out.push(Math.random() < 0.6 ? 'core' : 'lens'); return out; }
+function treasureGoods(n) { const out = []; for (let i = 0; i < n; i++) { const r = Math.random(); out.push(r < 0.6 ? 'lens' : r < 0.9 ? 'core' : 'chip'); } if (Math.random() < TUNE.print.treasure) out.push('bp_' + pickOne(TUNE.print.treasureKinds)); return out; }   // 3b: 宝物庫は確率で設計図も出す
+function bossGoods(n) { const out = ['king']; for (let i = 1; i < n; i++) out.push(Math.random() < 0.6 ? 'core' : 'lens'); out.push('bp_' + pickOne(TUNE.print.bossKinds)); return out; }   // 3b: ボスは設計図を1枚必ず落とす
+function pickOne(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function spawnGoods(x, y, ids) { for (const id of ids) { const a = Math.random() * 6.2832, v = 60 + Math.random() * 60; G.pickups.push({ kind: 'good', id, x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0 }); } }
 function spawnGoodsAround(x, y, ids) {   // 品を (x,y) のタイルの隣の床タイルへ1個ずつ置く（報酬の印・台座の真上に落とさない＝p3a-0.1.1）。隣が足りない分は従来どおり散らす
   const c0 = Math.floor(x / TILE), r0 = Math.floor(y / TILE); const cand = [];
@@ -651,14 +673,15 @@ function holdPickups() {   // 画面（入れ替え・3択）を閉じた直後�
 function bagFull() { return G.bag.length >= G.bagMax; }
 function pickGood(p) {   // 品に触れた＝枠が空いていれば入れる。満杯なら入れ替え画面（捨てる物を1つ選ぶ／拾わない）
   const g = GOOD[p.id];
-  if (!bagFull()) { G.bag.push(p.id); G.goodsGot++; SFX.pick(); floatText(p.x, p.y - 18, g.name + ' を袋へ（' + G.bag.length + '/' + G.bagMax + '）', g.col); saveRun(); return true; }
+  if (!bagFull()) { G.bag.push(p.id); G.goodsGot++; if (isPerm(p.id)) awardPrint(p.id); SFX.pick(); floatText(p.x, p.y - 18, g.name + (isPerm(p.id) ? '（残る）' : ' を袋へ（' + G.bag.length + '/' + G.bagMax + '）'), g.col); saveRun(); return true; }
   G.swap = { id: p.id, x: p.x, y: p.y }; G.mode = 'swap'; stick.on = false; SFX.deny(); return false;
 }
 function swapPick(i) {   // i＝捨てる袋の位置（-1＝拾わない）。捨てた品は消える（仮決め）
   const sw = G.swap; if (!sw) return; G.swap = null; G.mode = 'run'; holdPickups();
-  if (i >= 0 && i < G.bag.length) { const old = G.bag[i]; G.bag[i] = sw.id; G.goodsGot++; SFX.pick(); floatText(player.x, player.y - 22, GOOD[old].name + ' を捨てて ' + GOOD[sw.id].name, GOOD[sw.id].col); saveRun(); }
+  if (i >= 0 && i < G.bag.length) { const old = G.bag[i]; G.bag[i] = sw.id; G.goodsGot++; if (isPerm(sw.id)) awardPrint(sw.id); SFX.pick(); floatText(player.x, player.y - 22, GOOD[old].name + ' を捨てて ' + GOOD[sw.id].name, GOOD[sw.id].col); saveRun(); }
   else { G.pickups.push({ kind: 'good', id: sw.id, x: sw.x, y: sw.y, vx: 0, vy: 0, t: -1.2, hold: true }); }   // 拾わない＝その場に残す（一度離れてから拾う＝p3a-0.1.1）
 }
+function awardPrint(id) { const g = GOOD[id]; if (!g || !g.print) return; S.prints[g.mk] = (S.prints[g.mk] | 0) + TUNE.print.life; save(); }   // 3b: 設計図＝拾った時点で保存（恒久物＝死んでも残る・型と同じ扱い）。袋の枠は使う（R2）
 function rollParts(fam, n) {   // fam: 'implant' | 'mod' | 'any'。上限（パッチの上限・合計の上限）のスキルは出さない（全部上限なら重複可）
   let pool = PARTS.filter(p => (fam === 'any' || p.fam === fam) && canPatch(p.id));
   if (pool.length < n) pool = PARTS.filter(p => fam === 'any' || p.fam === fam);
@@ -718,7 +741,7 @@ function press(p) {
     if (inBtn(BTN.pause, p)) { goTitle(); return true; }
     return false;
   }
-  if (['title', 'pause', 'choose', 'swap', 'launch', 'store', 'forge', 'forgeSlot', 'talk', 'shop', 'data'].includes(G.mode)) { hitUI(p); return true; }
+  if (['title', 'pause', 'choose', 'swap', 'launch', 'store', 'forge', 'forgeSlot', 'talk', 'shop', 'data', 'print'].includes(G.mode)) { hitUI(p); return true; }
   if (G.mode === 'floorclear') { if (G.overlayT > 0.7) hitUI(p); return true; }
   if (G.mode === 'dead' || G.mode === 'win') { if (G.overlayT > 0.7) returnHome(G.mode === 'win' ? 'win' : 'dead'); return true; }
   return true;
@@ -870,6 +893,7 @@ const HOME_PEDS = [
   { kind: 'store',  label: '倉庫',   ch: '倉', col: COL.scrap,    x: TILE * 9.5, y: TILE * 6.5 },
   { kind: 'forge',  label: '工房',   ch: '工', col: COL.mod,      x: TILE * 2.5, y: TILE * 12.5 },
   { kind: 'talk',   label: NPC.name, ch: '人', col: COL.implant,  x: TILE * 9.5, y: TILE * 12.5 },
+  { kind: 'print',  label: '刷る',   ch: '刷', col: COL.portal,   x: RW / 2, y: TILE * 6.5 },   // 3b: 刷る＝中央の輪転機の上（出撃口への通り道から外れた位置）
 ];
 const HOME_ROOM = { gx: 0, gy: 0, type: 'home', doors: {}, tpl: 0, fx: false, fy: false, cleared: true, visited: true, spawned: false, reward: null, rewardTaken: true, items: null };
 function homeTiles() { const t = new Uint8Array(COLS * ROWS); for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) t[c + r * COLS] = 1; for (const [c, r] of [[5, 8], [6, 8], [5, 9], [6, 9]]) t[c + r * COLS] = 1; return t; }   // 外周の壁＋中央に輪転機（2×2の塊）
@@ -891,6 +915,7 @@ function openHome(kind) {
   else if (kind === 'store') G.mode = 'store';
   else if (kind === 'forge') G.mode = 'forge';
   else if (kind === 'talk') G.mode = 'talk';
+  else if (kind === 'print') { G.print = { sel: null, n: 1, msg: '' }; G.mode = 'print'; }
   else if (kind === 'shop') openShop();
   SFX.door();
 }
@@ -928,22 +953,44 @@ function exitInfo() {   // 出口の「進む／帰る」に添える材料（R1
   return { can, near };
 }
 
-// ---------- 店の1日（Phase 3a）＝棚に並べ→値付け3段階→開店→客が来て反応→売る→閉店 ----------
+// ---------- 店の1日（Phase 3a→3b）＝棚に並べ→値付け（±10%）→開店→客が来て反応（隠れた天井）→売る→閉店時の記録 ----------
+function shopShelves() { return S.shopLv > 0 ? TUNE.shop.expand[S.shopLv - 1].shelves : TUNE.shop.shelves; }   // 店拡張（#36）＝棚の数
+function shopStack() { return S.shopLv > 0 ? TUNE.shop.expand[S.shopLv - 1].stack : TUNE.shop.stack; }         // 1棚に積める数
+function moodOf(id) { const m = S.mood[marketOf(id)]; return typeof m === 'number' ? m : TUNE.shop.mood.init; }   // 品の気分（複製は元の品と共有）
+function ceilingOf(id) { return GOOD[marketOf(id)].base * moodOf(id); }                                       // 隠れた天井（Cr・小数のまま）＝これを超える値は誰も買わない（R27）
+function recoverMood() { for (const g of GOODS) S.mood[g.id] = Math.min(TUNE.shop.mood.max, moodOf(g.id) + TUNE.shop.mood.recover); }   // 出撃1回ごとの回復（R29）
+function mulOf(id) { const m = S.lastMul[marketOf(id)]; return typeof m === 'number' ? m : 1; }             // 前回の値付け倍率（品ごと・R30）
+function priceOf(id, mul) { return Math.max(1, Math.round(GOOD[id].base * mul)); }
+function stepMul(mul, dir) { const P = TUNE.shop.price; return Math.round(Math.min(P.max, Math.max(P.min, mul + dir * P.step)) * 100) / 100; }
 function openShop() {
-  G.shop = { phase: 'setup', shelves: [], pick: null, tier: null, custs: [], t: 0, nextT: 1.0, served: 0, sales: 0, soldN: 0, log: [] };
-  for (let i = 0; i < TUNE.shop.shelves; i++) G.shop.shelves.push(null);
+  G.shop = { phase: 'setup', shelves: [], pick: null, sel: null, mul: 1, edit: false, custs: [], t: 0, nextT: 1.0, served: 0, sales: 0, soldN: 0, log: [] };
+  for (let i = 0; i < shopShelves(); i++) G.shop.shelves.push(null);
   G.mode = 'shop'; stick.on = false;
 }
-function shelfPut(i, id, tier) {   // 倉庫から棚へ（同じ品を上限まで一度に載せる）
-  const sh = G.shop; const have = S.warehouse[id] | 0; if (have <= 0) return false;
-  const n = Math.min(TUNE.shop.stack, have); S.warehouse[id] = have - n; sh.shelves[i] = { id, tier, n, price: Math.round(GOOD[id].base * TUNE.shop.tiers[tier].k) }; save(); SFX.pick(); return true;
+function shelfPut(i, id, mul) {   // 倉庫から棚へ（同じ品を積みの上限まで一度に載せる）。mul＝値付けの倍率。棚に品があれば一度倉庫へ戻してから載せ直す（値の変更）
+  const sh = G.shop; if (sh.shelves[i]) shelfClear(i); const have = S.warehouse[id] | 0; if (have <= 0) return false;
+  const n = Math.min(shopStack(), have); S.warehouse[id] = have - n; S.lastMul[marketOf(id)] = mul;
+  sh.shelves[i] = { id, mul, n, put: n, sold: 0, last: null, price: priceOf(id, mul) }; save(); SFX.pick(); return true;
 }
 function shelfClear(i) { const sh = G.shop, s = sh.shelves[i]; if (!s) return; S.warehouse[s.id] = (S.warehouse[s.id] | 0) + s.n; sh.shelves[i] = null; save(); }
 function shopOpen() { const sh = G.shop; if (!sh.shelves.some(s => s && s.n > 0)) { SFX.deny(); return false; } sh.phase = 'open'; sh.t = 0; sh.nextT = 0.6; SFX.door(); return true; }
-function shopClose() {   // 売れ残りは倉庫へ戻す。1日進む
+function shopFinish() { const sh = G.shop; if (!sh || sh.phase !== 'open') return false; sh.phase = 'done'; sh.custs = []; SFX.clear(); return true; }   // 客を止めて閉店時の記録へ（早じまいも同じ）
+function shopRecords() { const sh = G.shop; return sh ? sh.shelves.filter(s => s).map(s => ({ id: s.id, mul: s.mul, price: s.price, put: s.put, sold: s.sold, last: s.last })) : []; }   // 閉店時の記録（R28）＝棚ごと
+function shopClose() {   // 売れ残りは倉庫へ戻す。日は進まない（3b・R29＝日は出撃の回数）
   const sh = G.shop; if (!sh) return; for (let i = 0; i < sh.shelves.length; i++) shelfClear(i);
-  if (sh.phase !== 'setup') { S.day++; S.sold += sh.soldN; S.earned += sh.sales; }
+  if (sh.phase !== 'setup') { S.sold += sh.soldN; S.earned += sh.sales; }
   save(); G.shop = null; closeHome(); if (sh.sales > 0) banner('本日の売上 Cr ' + sh.sales, 1.6);
+}
+function shopExpand() {   // 店を広げる（#36）＝段階1（棚4）・段階2（棚5＋積み8）
+  const ex = TUNE.shop.expand[S.shopLv]; if (!ex) return false; if (S.money < ex.cr) { SFX.deny(); return false; }
+  S.money -= ex.cr; S.shopLv++; save(); SFX.buy(); const sh = G.shop; if (sh) while (sh.shelves.length < shopShelves()) sh.shelves.push(null); return true;
+}
+function reactionOf(price, id) {   // 隠れた天井に対する位置＝言葉4段（R28）。買うのは天井以下だけ（R27）
+  const B = TUNE.shop.bands, r = price / ceilingOf(id);
+  if (r > 1.0001) return { buy: false, text: '高すぎる…', col: COL.doorClosed, key: 'over' };
+  if (r <= B.cheap) return { buy: true, text: '安すぎ！', col: COL.implant, key: 'cheap' };
+  if (r <= B.good) return { buy: true, text: 'いいね', col: COL.scrap, key: 'good' };
+  return { buy: true, text: 'ぎりぎり…', col: COL.mod, key: 'edge' };
 }
 function shopStocked() { return G.shop.shelves.filter(s => s && s.n > 0); }
 function updateShop(dt) {
@@ -952,17 +999,18 @@ function updateShop(dt) {
   if (sh.nextT <= 0 && sh.served < TUNE.shop.customers) {   // 来店
     sh.served++; sh.nextT = TUNE.shop.interval;
     const stocked = shopStocked(); const target = stocked.length ? sh.shelves.indexOf(stocked[Math.floor(Math.random() * stocked.length)]) : -1;
-    sh.custs.push({ i: target, t: 0, st: 'walk', text: null, col: COL.text, seed: Math.random() });
+    sh.custs.push({ i: target, t: 0, st: 'walk', text: null, col: COL.text });
   }
   for (let k = sh.custs.length - 1; k >= 0; k--) {
     const c = sh.custs[k]; c.t += dt;
     if (c.st === 'walk' && c.t >= TUNE.shop.walkT) {
       c.st = 'react'; c.t = 0; const s = c.i >= 0 ? sh.shelves[c.i] : null;
       if (!s || s.n <= 0) { c.text = '何もない…'; c.col = COL.mut; }
-      else { const tier = TUNE.shop.tiers[s.tier]; const buy = c.seed < tier.p;   // seed＝その客の財布の余裕。値付けが高いほど買う人が減る
-        if (buy) { s.n--; S.money += s.price; sh.sales += s.price; sh.soldN++; save(); SFX.buy(); c.text = (s.tier === 'low' ? '安い！' : s.tier === 'high' ? '奮発した' : 'いいね') + '　+Cr ' + s.price; c.col = s.tier === 'low' ? COL.implant : COL.scrap; if (Math.random() < 0.3) c.say = CUST_LINES[Math.floor(Math.random() * CUST_LINES.length)]; }
-        else { c.text = s.tier === 'high' ? '高すぎる…' : 'うーん…'; c.col = COL.doorClosed; SFX.deny(); }
-        sh.log.unshift(GOOD[s.id].ch + ' ' + (buy ? '売れた Cr ' + s.price : '見送り') + (c.say ? '「' + c.say + '」' : '')); if (sh.log.length > 5) sh.log.pop();
+      else { const re = reactionOf(s.price, s.id);   // 3b: 確率ではなく天井で決まる（R27）
+        if (re.buy) { s.n--; s.sold++; S.money += s.price; sh.sales += s.price; sh.soldN++; S.mood[marketOf(s.id)] = Math.max(TUNE.shop.mood.min, moodOf(s.id) - TUNE.shop.mood.drop); save(); SFX.buy(); c.text = re.text + '　+Cr ' + s.price; c.col = re.col; if (Math.random() < 0.3) c.say = CUST_LINES[Math.floor(Math.random() * CUST_LINES.length)]; }
+        else { c.text = re.text; c.col = re.col; SFX.deny(); }
+        s.last = re.text;
+        sh.log.unshift(GOOD[s.id].ch + ' ' + (re.buy ? '売れた Cr ' + s.price : '見送り') + '（' + re.text + '）' + (c.say ? '「' + c.say + '」' : '')); if (sh.log.length > 5) sh.log.pop();
       }
     }
     else if (c.st === 'react' && c.t >= 1.1) { c.st = 'leave'; c.t = 0; }
@@ -970,9 +1018,15 @@ function updateShop(dt) {
   }
   if (sh.served >= TUNE.shop.customers && sh.custs.length === 0) { sh.phase = 'done'; SFX.clear(); }
 }
+// ---------- 輪転機＝刷る（3b・#15・R31）＝設計図から複製を刷る。複製は売り物専用（工房の材料に数えない）。1部あたりスクラップを使う ----------
+function printMax(id) { return Math.max(0, Math.min(S.prints[id] | 0, Math.floor(S.scrapBank / TUNE.print.scrapPer))); }   // 今刷れる最大部数＝版の残りとスクラップの少ない方
+function printCopies(id, n) {
+  const g = GOOD[id]; n = n | 0; if (!g || g.copy || g.print) return false; if (n < 1 || n > printMax(id)) { SFX.deny(); return false; }
+  S.prints[id] = (S.prints[id] | 0) - n; if (!S.prints[id]) delete S.prints[id]; S.scrapBank -= n * TUNE.print.scrapPer; S.warehouse[id + '_p'] = (S.warehouse[id + '_p'] | 0) + n; save(); SFX.buy(); return true;
+}
 
 // ---------- データの書き出し／読み込み（Phase 3a・R6）＝ブラウザ保存が消えても戻せるように ----------
-function exportData() { const o = { v: 3, at: Date.now(), S, run: loadRun() }; return 'PRINTRUN1:' + btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }   // 接頭辞は互換のため PRINTRUN1 のまま・中身は v3（旧文字列も読める＝migrateS）
+function exportData() { const o = { v: 4, at: Date.now(), S, run: loadRun() }; return 'PRINTRUN1:' + btoa(unescape(encodeURIComponent(JSON.stringify(o)))); }   // 接頭辞は互換のため PRINTRUN1 のまま・中身は v3（旧文字列も読める＝migrateS）
 function importData(text) {
   try { const t = String(text || '').trim(); if (!t.startsWith('PRINTRUN1:')) return '形式が違います（PRINTRUN1: で始まる文字列）';
     const o = JSON.parse(decodeURIComponent(escape(atob(t.slice(10))))); if (!o || !o.S) return '中身が読めません';
@@ -1207,6 +1261,7 @@ function drawPickups() {
       ctx.fillStyle = COL.text; ctx.font = F(11, 600); ctx.fillText(h.label, ped.x, ped.y + FS(31) + 1);
       if (h.kind === 'launch' && G.saved) { ctx.fillStyle = COL.player; ctx.font = F(10, 500); ctx.fillText('続きあり', ped.x, ped.y + FS(44)); }
       if (h.kind === 'store') { ctx.fillStyle = COL.mut; ctx.font = F(10, 500, true); ctx.fillText('品 ' + wareCount() + '  ◆' + S.scrapBank, ped.x, ped.y + FS(44)); }
+      if (h.kind === 'print') { const k = GOODS.filter(g => (S.prints[g.id] | 0) > 0).length; ctx.fillStyle = COL.mut; ctx.font = F(10, 500, true); ctx.fillText(k ? '設計図 ' + k + '種' : '設計図なし', ped.x, ped.y + FS(44)); }
       continue;
     }
     ctx.fillStyle = '#1b2a4a'; ctx.beginPath(); ctx.arc(ped.x, ped.y, 17, 0, 6.2832); ctx.fill(); ctx.strokeStyle = ped.kind === 'treasure' ? COL.treasure : COL.shop; ctx.lineWidth = 2; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(ped.t * 4); ctx.beginPath(); ctx.arc(ped.x, ped.y, 20, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
@@ -1236,7 +1291,7 @@ function drawWorld() {
 }
 function drawStick() { if (!stick.on || (G.mode !== 'run' && G.mode !== 'home')) return; ctx.strokeStyle = COL.player; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(stick.ox, stick.oy, 48, 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 0.55; ctx.fillStyle = COL.player; const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy), k = d > 48 ? 48 / d : 1; ctx.beginPath(); ctx.arc(stick.ox + dx * k, stick.oy + dy * k, 16, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; }
 function fmt(t) { const m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + (s < 10 ? '0' : '') + s; }
-const SCREEN_MODES = ['shop', 'forge', 'forgeSlot', 'store', 'talk', 'launch', 'swap', 'data'];   // 拠点の各画面＝上下の帯（HUD）を描かない（重なって読みにくい）
+const SCREEN_MODES = ['shop', 'forge', 'forgeSlot', 'store', 'talk', 'launch', 'swap', 'data', 'print'];   // 拠点の各画面＝上下の帯（HUD）を描かない（重なって読みにくい）
 function drawHUD() {
   layoutButtons();
   if (SCREEN_MODES.includes(G.mode)) { ctx.fillStyle = COL.mut; ctx.font = F(10, 500, true, true); ctx.textAlign = 'left'; ctx.fillText(VERSION, 14, L.h - L.sab - 5); return; }
@@ -1291,9 +1346,9 @@ function drawOverlays() {
     centerText('動く＝避ける　止まる＝撃つ　フリック＝ダッシュ', y + FS(14), F(12, 500), COL.mut);
     centerText('ダンジョンで品を拾い、店で売るか、工房で義体・銃に焼き込む', y + FS(34), F(11, 500), COL.mut);
     centerText('死ぬと品だけ失う。スクラップ・義体・銃・型は残る', y + FS(50), F(11, 500), COL.mut);
-    centerText('フロアの出口で「帰る／進む」を選べる', y + FS(66), F(11, 500), COL.mut);
+    centerText('出口で「帰る／進む」。店の値付けは客の反応で天井を探る', y + FS(66), F(11, 500), COL.mut);
     centerText('通算　刷 ' + S.runs + '　完走 ' + S.wins + '　撃破 ' + S.kills + '　最高 FLOOR ' + S.bestFloor + '　売上 Cr ' + S.earned, y + FS(90), F(12, 500), COL.mut);
-    centerText(VERSION + '  Phase 5-1 キャラの動き＋銃の見た目＋3c-1 ビルドの骨＋文字1.3倍', y + FS(108), F(11, 500, true, true), COL.mut);   // 版表示＝倍率を掛けない
+    centerText(VERSION + '  Phase 3b 店の見直し（天井・気分・±10%・刷る）＋5-1＋3c-1', y + FS(108), F(11, 500, true, true), COL.mut);   // 版表示＝倍率を掛けない
   } else if (G.mode === 'pause') {
     overlay(0.7); centerText('一時停止', cy - 190, F(26, 700));
     let y = cy - 150;
@@ -1303,7 +1358,7 @@ function drawOverlays() {
     y = button('ダッシュ操作: ' + ({ tap: 'タップ', flick: 'フリック', both: '両方' })[S.dashInput], y, () => { S.dashInput = ({ tap: 'flick', flick: 'both', both: 'tap' })[S.dashInput] || 'tap'; save(); });
     y = button('タイトルへ', y, () => goTitle(), null, '中断セーブ＝この部屋の入口から再開できる');
     y = button('やり直す（今の刷を捨てる）', y, () => { clearRun(); newRun(); }, COL.doorClosed);
-    { const cnt = {}; for (const id of G.bag) cnt[id] = (cnt[id] || 0) + 1; const txt = GOODS.filter(g => cnt[g.id]).map(g => g.ch + '×' + cnt[g.id]).join('　'); centerText('袋 ' + G.bag.length + '/' + G.bagMax + (txt ? '　' + txt : '　（空）') + '　銃 ' + G.gun.name, y + 14, F(12, 500), COL.mut); }
+    { const cnt = {}; for (const id of G.bag) cnt[id] = (cnt[id] || 0) + 1; const txt = Object.keys(cnt).map(id => GOOD[id].ch + '×' + cnt[id]).join('　'); centerText('袋 ' + G.bag.length + '/' + G.bagMax + (txt ? '　' + txt : '　（空）') + '　銃 ' + G.gun.name, y + 14, F(12, 500), COL.mut); }
   } else if (G.mode === 'choose' && G.choice) {
     overlay(0.78); const c = G.choice;
     centerText(c.fam === 'implant' ? '義体パッチを選ぶ' : c.fam === 'mod' ? '銃パッチを選ぶ' : '報酬を選ぶ（義体パッチか銃パッチ）', cy - 170, F(22, 700));
@@ -1322,8 +1377,8 @@ function drawOverlays() {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.65 * a);
     if (G.overlayT > 0.4) { centerText('刷り直し', cy - 70, F(40, 800), COL.doorClosed, a); centerText('REPRINT', cy - 44, F(12, 600, true), COL.mut, a);
       centerText((G.floor.boss ? 'FINAL' : 'FLOOR ' + (G.floorIdx + 1)) + '　ROOM ' + G.roomsVisited + '/' + G.floor.n + '　撃破 ' + G.kills + '　' + fmt(G.time), cy - 4, F(14, 500), COL.text, a);
-      centerText('失ったもの＝品 ' + G.bag.length + '個（目安 Cr ' + bagValue() + '）', cy + 22, F(13, 500), COL.doorClosed, a);
-      centerText('残ったもの＝スクラップ ◆' + G.scrap + '・義体・銃・型・住人の記憶', cy + 42, F(13, 500), COL.scrap, a);
+      centerText('失ったもの＝品 ' + G.bag.filter(id => !isPerm(id)).length + '個（目安 Cr ' + bagValue() + '）', cy + 22, F(13, 500), COL.doorClosed, a);
+      centerText('残ったもの＝◆' + G.scrap + '・義体・銃・型・設計図・住人の記憶', cy + 42, F(13, 500), COL.scrap, a);
       if (G.overlayT > 0.7) centerText('タップで印刷所へ（新しい体に刷り直す）', cy + 80, F(16, 600), COL.text, blink); }
   } else if (G.mode === 'floorclear') {
     const a = Math.min(1, G.overlayT / 0.7); overlay(0.6 * a);
@@ -1348,9 +1403,9 @@ function drawOverlays() {
   } else if (G.mode === 'swap' && G.swap) {
     overlay(0.8); const g = GOOD[G.swap.id];
     centerText('袋がいっぱい（' + G.bag.length + '/' + G.bagMax + '）', cy - 200, F(22, 700));
-    centerText('拾いたい物＝' + g.name + '（目安 Cr ' + g.base + '）', cy - 174, F(14, 600), g.col);
+    centerText('拾いたい物＝' + g.name + (isPerm(G.swap.id) ? '（設計図＝死んでも残る）' : '（目安 Cr ' + g.base + '）'), cy - 174, F(14, 600), g.col);
     centerText('捨てる物をタップ（捨てた物は消える）', cy - 154, F(12, 500), COL.mut);
-    tileGrid(G.bag.map((id, i) => ({ ch: GOOD[id].ch, name: GOOD[id].name, sub: 'Cr ' + GOOD[id].base, col: GOOD[id].col, act: () => swapPick(i) })), cy - 140, 4);
+    tileGrid(G.bag.map((id, i) => ({ ch: GOOD[id].ch, name: isPerm(id) ? '設計図' : GOOD[id].name, sub: isPerm(id) ? '残る' : 'Cr ' + GOOD[id].base, col: GOOD[id].col, act: () => swapPick(i) })), cy - 140, 4);   // 3b: 設計図＝短い名前＋「残る」
     button('拾わない（その場に残す）', L.h - L.sab - 120, () => swapPick(-1), null);
   } else if (G.mode === 'launch') {
     overlay(0.8); centerText('出撃口', cy - 200, F(24, 700), COL.exit);
@@ -1362,9 +1417,12 @@ function drawOverlays() {
   } else if (G.mode === 'store') {
     overlay(0.8); centerText('倉庫', cy - 200, F(24, 700), COL.scrap);
     centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '　品は売るか、工房で焼き込む素材にする', cy - 176, F(12, 500), COL.mut);
-    const ny = tileGrid(GOODS.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, sub2: g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, 2);   // p53: 出どころは2行目（2列×3段＝出どころの文が3列では入らない）
-    centerText('売り物は店の棚へ。値付けは安／適／高の3段階', ny + 14, F(12, 500), COL.mut);
-    button('戻る', ny + 30, () => closeHome());
+    const show = GOODS.concat(COPIES.filter(g => (S.warehouse[g.id] | 0) > 0));   // 3b: 複製は倉庫にある時だけ並べる
+    const ny = tileGrid(show.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, sub2: g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, 2);   // p53: 出どころは2行目（2列×3段＝出どころの文が3列では入らない）
+    const bp = GOODS.filter(g => (S.prints[g.id] | 0) > 0).map(g => g.ch + ' ' + (S.prints[g.id] | 0) + '部').join('　');
+    centerText('設計図（版の残り）＝' + (bp || 'なし') + '　→ 輪転機で刷る', ny + 14, F(11, 500), COL.portal);
+    centerText('売り物は店の棚へ。値付けは ±10% で探る（天井を超えると売れない）', ny + 32, F(11, 500), COL.mut);
+    button('戻る', ny + 48, () => closeHome());
   } else if (G.mode === 'forge') {
     drawForge(cy);
   } else if (G.mode === 'forgeSlot' && G.forge) {
@@ -1387,6 +1445,8 @@ function drawOverlays() {
     button('戻る', y + 70, () => goTitle());
   } else if (G.mode === 'shop' && G.shop) {
     drawShop(cy);
+  } else if (G.mode === 'print') {
+    drawPrint(cy);
   }
 }
 function bagValue() { return G.bag.reduce((a, id) => a + (GOOD[id] ? GOOD[id].base : 0), 0); }
@@ -1470,54 +1530,93 @@ function drawForgeSlot(cy) {   // 部位の候補＝標準／街路型／王型�
   if (f.msg) y = wrapText(f.msg, L.w / 2, y + 12, Math.min(340, L.w - 32), FS(16), F(12, 500), COL.text) + 4;
   button('戻る', Math.max(y + 4, L.h - L.sab - 110), () => { G.mode = 'forge'; G.forge = null; });
 }
-function drawShop(cy) {   // 店の1日＝上に棚3つ、中に客が歩く土間、下にボタン
+function drawShop(cy) {   // 店の1日（3b）＝上に棚（3〜5）、中に客が歩く土間、下にボタン／品の選択／値付け（±10%）／閉店時の記録
   const sh = G.shop; overlay(0.92);
   const top = L.sat + 12; ctx.textAlign = 'left'; ctx.fillStyle = COL.shop; ctx.font = F(20, 700); ctx.fillText('店　DAY ' + S.day, 16, top + 24);
   ctx.textAlign = 'right'; ctx.fillStyle = COL.scrap; ctx.font = F(15, 700, true); ctx.fillText('Cr ' + S.money + (sh.sales ? '  (+' + sh.sales + ')' : ''), L.w - 16, top + 24);
-  // 棚
+  // 棚（拡張で3→4→5）
   const w = Math.min(340, L.w - 32), gap = 8, n = sh.shelves.length, tw = (w - gap * (n - 1)) / n, th = FS(70), x0 = (L.w - w) / 2, sy = top + 44;   // p53: 棚の高さ 78→FS(70)=91
   sh.shelves.forEach((s, i) => { const x = x0 + i * (tw + gap);
-    if (sh.phase === 'setup') UI.push({ x, y: sy, w: tw, h: th, act: () => { if (s) { shelfClear(i); } else { sh.pick = i; sh.tier = null; } } });
-    ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, sy, tw, th); ctx.strokeStyle = s ? GOOD[s.id].col : '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, sy + 0.5, tw - 1, th - 1);
+    if (sh.phase === 'setup') UI.push({ x, y: sy, w: tw, h: th, act: () => { sh.pick = i; if (s) { sh.sel = s.id; sh.mul = s.mul; sh.edit = true; } else { sh.sel = null; sh.edit = false; } } });   // 3b: 品のある棚を押す＝値を変える／倉庫へ戻す
+    ctx.fillStyle = (sh.phase === 'setup' && sh.pick === i) ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.07)'; ctx.fillRect(x, sy, tw, th); ctx.strokeStyle = s ? GOOD[s.id].col : '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, sy + 0.5, tw - 1, th - 1);
     ctx.textAlign = 'center';
-    if (!s) { ctx.fillStyle = COL.mut; ctx.font = F(22, 700); ctx.fillText('＋', x + tw / 2, sy + FS(36)); ctx.font = F(10, 500); ctx.fillText(sh.phase === 'setup' ? '棚に置く' : '空', x + tw / 2, sy + FS(58)); }
-    else { const g = GOOD[s.id]; ctx.fillStyle = g.col; ctx.font = F(18, 700); ctx.fillText(g.ch + ' ×' + s.n, x + tw / 2, sy + FS(26)); ctx.fillStyle = COL.text; ctx.font = fitFont(F(11, 600), g.name, tw - 8); ctx.fillText(g.name, x + tw / 2, sy + FS(43)); ctx.fillStyle = s.tier === 'low' ? COL.implant : s.tier === 'high' ? COL.doorClosed : COL.scrap; ctx.font = F(12, 700, true); ctx.fillText(TUNE.shop.tiers[s.tier].label + ' Cr ' + s.price, x + tw / 2, sy + FS(61)); }
+    if (!s) { ctx.fillStyle = COL.mut; ctx.font = F(22, 700); ctx.fillText('＋', x + tw / 2, sy + FS(36)); const t = sh.phase === 'setup' ? '棚に置く' : '空'; ctx.font = fitFont(F(10, 500), t, tw - 6); ctx.fillText(t, x + tw / 2, sy + FS(58)); }
+    else if (n <= 3) { const g = GOOD[s.id]; ctx.fillStyle = g.col; ctx.font = fitFont(F(18, 700), g.ch + ' ×' + s.n, tw - 6); ctx.fillText(g.ch + ' ×' + s.n, x + tw / 2, sy + FS(26)); ctx.fillStyle = COL.text; ctx.font = fitFont(F(11, 600), g.name, tw - 6); ctx.fillText(g.name, x + tw / 2, sy + FS(43)); const pt = 'Cr ' + s.price + ' ×' + s.mul.toFixed(1); ctx.fillStyle = COL.scrap; ctx.font = fitFont(F(12, 700, true), pt, tw - 6); ctx.fillText(pt, x + tw / 2, sy + FS(61)); }
+    else { const g = GOOD[s.id], nm = g.copy ? GOOD[g.mk].name : g.name;   // 棚4〜5（店拡張）＝幅が狭いので4行・小さめ（複製は右上に「複」）
+      ctx.fillStyle = g.col; ctx.font = fitFont(F(14, 700), g.ch + ' ×' + s.n, tw - 6); ctx.fillText(g.ch + ' ×' + s.n, x + tw / 2, sy + FS(20)); ctx.fillStyle = COL.text; ctx.font = fitFont(F(9, 600), nm, tw - 6); ctx.fillText(nm, x + tw / 2, sy + FS(34));
+      ctx.fillStyle = COL.scrap; ctx.font = fitFont(F(11, 700, true), 'Cr ' + s.price, tw - 6); ctx.fillText('Cr ' + s.price, x + tw / 2, sy + FS(48)); ctx.font = fitFont(F(10, 700, true), '×' + s.mul.toFixed(1), tw - 6); ctx.fillText('×' + s.mul.toFixed(1), x + tw / 2, sy + FS(62));
+      if (g.copy) { ctx.fillStyle = g.col; ctx.font = F(8, 700); ctx.textAlign = 'right'; ctx.fillText('複', x + tw - 3, sy + th - 4); ctx.textAlign = 'center'; } }   // 複製の印＝右下（1行目の「×n」と重ねない）
   });
-  // 土間＝客が歩く
-  const pickShift = (sh.phase === 'setup' && sh.pick !== null && sh.tier === null) ? 2 * (FS(50) - 54) + 4 : 0;   // p53: 品を選ぶグリッドが高くなった分だけ土間を縮める（「入口」と見出しを重ねない）
-  const fy = sy + th + 10, fh = Math.max(120, L.h - L.sab - 200 - fy - pickShift);
+  // 土間＝客が歩く（品の選択・値付けのときは下の欄が高くなるぶん縮める）
+  const shift = (sh.phase === 'setup' && sh.pick !== null) ? (sh.sel === null ? 2 * (FS(50) - 54) + 4 : (sh.edit ? 108 : 68)) : (sh.phase === 'setup' && TUNE.shop.expand[S.shopLv]) ? 12 : 0;   // 値付け＝68／棚の値の変更＝108（ボタン1つ多い）／準備でボタン3つ＝12（版表示と重ねない）
+  const fy = sy + th + 10, fh = Math.max(120, L.h - L.sab - 200 - fy - shift);
   ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fillRect(x0, fy, w, fh); ctx.strokeStyle = '#1f2c4c'; ctx.strokeRect(x0 + 0.5, fy + 0.5, w - 1, fh - 1);
   ctx.fillStyle = COL.mut; ctx.font = F(10, 500); ctx.textAlign = 'center'; ctx.fillText('入口', x0 + w / 2, fy + fh - 6);
   for (const c of sh.custs) { const tx = c.i >= 0 ? x0 + c.i * (tw + gap) + tw / 2 : x0 + w / 2, ty = fy + 18, ex = x0 + w / 2, ey = fy + fh - 16;
     let k = c.st === 'walk' ? Math.min(1, c.t / TUNE.shop.walkT) : c.st === 'react' ? 1 : 1 - Math.min(1, c.t / 0.6); const px = ex + (tx - ex) * k, py = ey + (ty - ey) * k;
     ctx.fillStyle = '#2b3d6b'; ctx.beginPath(); ctx.arc(px, py, 9, 0, 6.2832); ctx.fill(); ctx.strokeStyle = COL.text; ctx.lineWidth = 1.5; ctx.stroke();
     if (c.st === 'react' && c.text) { ctx.fillStyle = c.col; ctx.font = F(12, 700); ctx.textAlign = 'center'; ctx.fillText(c.text, px, py - 16); if (c.say) { ctx.fillStyle = COL.mut; ctx.font = F(10, 500); ctx.fillText('「' + c.say + '」', px, py + 24); } } }
-  // 記録
-  ctx.textAlign = 'left'; ctx.fillStyle = COL.mut; ctx.font = F(11, 500); sh.log.slice(0, 4).forEach((t, i) => { ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, fy + fh - FS(66) + i * FS(14)); });   // p53: 客の一言つきの長い行は縮めて収める   // 記録＝土間の下側（客の反応は上側の棚のそば）
-  ctx.textAlign = 'right'; ctx.fillText(sh.phase === 'setup' ? '棚をタップして品を置く' : sh.phase === 'open' ? '客 ' + sh.served + '/' + TUNE.shop.customers : '閉店', x0 + w - 8, fy + 16);
+  // 記録（開店中＝直近の客／閉店時＝棚ごとのまとめ＝R28）
+  ctx.textAlign = 'left';
+  if (sh.phase === 'done') {
+    ctx.fillStyle = COL.text; ctx.font = F(12, 700); ctx.fillText('閉店時の記録', x0 + 8, fy + FS(18)); let ry = fy + FS(18) + FS(16);
+    shopRecords().forEach(r => { const g = GOOD[r.id]; const t = g.ch + ' ' + g.name + '　Cr ' + r.price + '（×' + r.mul.toFixed(1) + '）　売れた ' + r.sold + '/' + r.put + '　最後＝' + (r.last || '客が来なかった'); ctx.fillStyle = r.sold >= r.put ? COL.scrap : r.sold === 0 ? COL.doorClosed : COL.text; ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, ry); ry += FS(14); });
+    const hint = '「高すぎる」は天井の上。売れるほど天井は下がり、出撃で戻る'; ctx.fillStyle = COL.mut; ctx.font = fitFont(F(10, 500), hint, w - 16); ctx.fillText(hint, x0 + 8, ry + 2);
+  } else { ctx.fillStyle = COL.mut; sh.log.slice(0, 4).forEach((t, i) => { ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, fy + fh - FS(66) + i * FS(14)); }); }
+  ctx.textAlign = 'right'; ctx.fillStyle = COL.mut; ctx.font = F(11, 500); ctx.fillText(sh.phase === 'setup' ? '棚をタップして品を置く' : sh.phase === 'open' ? '客 ' + sh.served + '/' + TUNE.shop.customers : '閉店', x0 + w - 8, fy + 16);
   // 下のボタン／品の選択／値付け
-  let y = L.h - L.sab - 180;
+  let y = L.h - L.sab - 180 - ((sh.phase === 'setup' && sh.pick === null) ? shift : 0);
   if (sh.phase === 'setup' && sh.pick !== null) {
-    if (sh.tier === null) {   // 品を選ぶ
-      y -= pickShift;   // p53: タイルが高くなった分（2段）だけ上へ
-      const avail = GOODS.filter(g => (S.warehouse[g.id] | 0) > 0);
+    y -= shift;
+    if (sh.sel === null) {   // 品を選ぶ（複製も並ぶ）
+      const avail = GOODS.concat(COPIES).filter(g => (S.warehouse[g.id] | 0) > 0);
       if (!avail.length) { centerText('倉庫に品がない', y + 20, F(14, 600), COL.mut); button('やめる', y + 40, () => { sh.pick = null; }); return; }
       centerText('棚 ' + (sh.pick + 1) + ' に置く品を選ぶ', y - 6, F(13, 600));
-      const ny = tileGrid(avail.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, act: () => { sh.tier = g.id; } })), y + 4, 3);   // p53: 3列（品5種でも2段に収まる）
+      const ny = tileGrid(avail.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, act: () => { sh.sel = g.id; sh.mul = mulOf(g.id); } })), y + 4, 3);   // p53: 3列
       button('やめる', ny + 4, () => { sh.pick = null; });
-    } else {   // 値付け（sh.tier に品idを一時的に入れている）
-      const g = GOOD[sh.tier]; centerText(g.name + '　基準 Cr ' + g.base + '　値付けを選ぶ', y - 6, F(13, 600), g.col);
-      const bw = (Math.min(340, L.w - 32) - 16) / 3, bx0 = (L.w - Math.min(340, L.w - 32)) / 2;
-      [['low', COL.implant], ['mid', COL.scrap], ['high', COL.doorClosed]].forEach(([t, col], i) => { const x = bx0 + i * (bw + 8), tr = TUNE.shop.tiers[t]; UI.push({ x, y: y + 4, w: bw, h: 56, act: () => { shelfPut(sh.pick, g.id, t); sh.pick = null; sh.tier = null; } });
-        ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y + 4, bw, 56); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, y + 4.5, bw - 1, 55);
-        ctx.textAlign = 'center'; ctx.fillStyle = col; ctx.font = F(16, 700); ctx.font = fitFont(F(16, 700), tr.label + '　Cr ' + Math.round(g.base * tr.k), bw - 8); ctx.fillText(tr.label + '　Cr ' + Math.round(g.base * tr.k), x + bw / 2, y + 28); ctx.fillStyle = COL.mut; ctx.font = fitFont(F(10, 500), t === 'low' ? 'ほぼ全員が買う' : t === 'mid' ? '多くが買う' : '買う人は少ない', bw - 8); ctx.fillText(t === 'low' ? 'ほぼ全員が買う' : t === 'mid' ? '多くが買う' : '買う人は少ない', x + bw / 2, y + 48); });
-      button('やめる', y + 70, () => { sh.pick = null; sh.tier = null; });
+    } else {   // 値付け＝±10%（R30）。数字で見せるのは自分の値だけ＝天井は客の反応で探る（R28）
+      const g = GOOD[sh.sel], price = priceOf(sh.sel, sh.mul), P = TUNE.shop.price;
+      y += 8; centerText(g.name + '　基準 Cr ' + g.base + (sh.edit ? '　（棚 ' + (sh.pick + 1) + '）' : ''), y - 6, F(13, 600), g.col);
+      centerText('Cr ' + price + '　×' + sh.mul.toFixed(1), y + 24, F(24, 800), COL.scrap);
+      const bw = (w - 8) / 2; [[-1, '−10%'], [1, '＋10%']].forEach(([d, lab], i) => { const x = x0 + i * (bw + 8), on = d < 0 ? sh.mul > P.min + 1e-6 : sh.mul < P.max - 1e-6; UI.push({ x, y: y + 38, w: bw, h: 44, act: () => { sh.mul = stepMul(sh.mul, d); } });
+        ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y + 38, bw, 44); ctx.strokeStyle = on ? COL.text : '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, y + 38.5, bw - 1, 43); ctx.textAlign = 'center'; ctx.fillStyle = on ? COL.text : COL.mut; ctx.font = F(18, 700); ctx.fillText(lab, x + bw / 2, y + 67); });
+      let by = y + 92;
+      by = button(sh.edit ? '決定' : '置く', by, () => { shelfPut(sh.pick, sh.sel, sh.mul); sh.pick = null; sh.sel = null; sh.edit = false; }, g.col, '反応＝安すぎ！／いいね／ぎりぎり…／高すぎる（買わない）');
+      if (sh.edit) by = button('倉庫へ戻す', by, () => { shelfClear(sh.pick); sh.pick = null; sh.sel = null; sh.edit = false; });
+      button('やめる', by, () => { sh.pick = null; sh.sel = null; sh.edit = false; });
     }
     return;
   }
-  if (sh.phase === 'setup') { y = button('開店', y, () => shopOpen(), shopStocked().length ? COL.shop : null, shopStocked().length ? '客が ' + TUNE.shop.customers + ' 人来る。棚の品をタップで倉庫へ戻す' : '棚に品を置いてから'); y = button('戻る', y, () => shopClose()); }
-  else if (sh.phase === 'open') { y = button('閉店（早じまい）', y, () => shopClose(), null, '売れ残りは倉庫へ戻る'); }
-  else { centerText('本日の売上　Cr ' + sh.sales + '　（' + sh.soldN + ' 個）', y + 16, F(16, 700), COL.scrap); y = button('閉店して戻る', y + 34, () => shopClose(), COL.shop, '売れ残りは倉庫へ戻る。1日進む'); }
+  if (sh.phase === 'setup') {
+    y = button('開店', y, () => shopOpen(), shopStocked().length ? COL.shop : null, shopStocked().length ? '客が ' + TUNE.shop.customers + ' 人来る。棚をタップで値を変える／倉庫へ戻す' : '棚に品を置いてから');
+    const ex = TUNE.shop.expand[S.shopLv]; if (ex) y = button('店を広げる（段階' + (S.shopLv + 1) + '）Cr ' + ex.cr, y, () => shopExpand(), S.money >= ex.cr ? COL.portal : null, '棚 ' + ex.shelves + '・1棚 ' + ex.stack + ' 個まで');
+    y = button('戻る', y, () => shopClose());
+  }
+  else if (sh.phase === 'open') { y = button('閉店（早じまい）', y, () => shopFinish(), null, '記録を見てから閉める'); }
+  else { centerText('本日の売上　Cr ' + sh.sales + '　（' + sh.soldN + ' 個）', y + 16, F(16, 700), COL.scrap); y = button('閉店して戻る', y + 34, () => shopClose(), COL.shop, '売れ残りは倉庫へ戻る（日は進まない）'); }
+}
+function drawPrint(cy) {   // 輪転機＝刷る（3b・#15・R31）＝設計図を選ぶ→部数を±→刷る
+  const pr = G.print || (G.print = { sel: null, n: 1, msg: '' }); overlay(0.85);
+  centerText('輪転機＝刷る', cy - 200, F(24, 700), COL.portal);
+  centerText('設計図から複製を刷る　◆' + S.scrapBank + '（' + TUNE.print.scrapPer + '/部）　複製は売り物専用', cy - 176, F(11, 500), COL.mut);
+  const list = GOODS.filter(g => (S.prints[g.id] | 0) > 0);
+  if (!list.length) { centerText('設計図がない（宝物庫・ボスで見つかる。死んでも残る）', cy - 120, F(13, 600), COL.mut); if (pr.msg) centerText(pr.msg, cy - 96, F(12, 500), COL.text); button('戻る', cy - 70, () => closeHome()); return; }
+  if (!pr.sel) {
+    const ny = tileGrid(list.map(g => ({ ch: '図', name: g.name + 'の設計図', sub: '残り ' + (S.prints[g.id] | 0) + ' 部　Cr ' + g.base, sub2: '複製 ' + (S.warehouse[g.id + '_p'] | 0) + ' 個が倉庫に', col: g.col, act: () => { pr.sel = g.id; pr.n = Math.max(1, Math.min(4, printMax(g.id))); pr.msg = ''; } })), cy - 160, 2);
+    if (pr.msg) centerText(pr.msg, ny + 14, F(12, 500), COL.text);
+    button('戻る', ny + 30, () => closeHome());
+  } else {
+    const g = GOOD[pr.sel], mx = printMax(pr.sel), left = S.prints[pr.sel] | 0; pr.n = Math.max(1, Math.min(pr.n, Math.max(1, mx)));
+    centerText(g.name + 'の設計図　残り ' + left + ' 部', cy - 130, F(15, 600), g.col);
+    centerText(pr.n + ' 部　◆' + (pr.n * TUNE.print.scrapPer), cy - 92, F(26, 800), COL.scrap);
+    const w = Math.min(340, L.w - 40), x0 = (L.w - w) / 2, bw = (w - 8) / 2, by0 = cy - 76;
+    [[-1, '−1'], [1, '＋1']].forEach(([d, lab], i) => { const x = x0 + i * (bw + 8), on = d < 0 ? pr.n > 1 : pr.n < mx; UI.push({ x, y: by0, w: bw, h: 44, act: () => { pr.n = Math.max(1, Math.min(Math.max(1, mx), pr.n + d)); } });
+      ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, by0, bw, 44); ctx.strokeStyle = on ? COL.text : '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, by0 + 0.5, bw - 1, 43); ctx.textAlign = 'center'; ctx.fillStyle = on ? COL.text : COL.mut; ctx.font = F(18, 700); ctx.fillText(lab, x + bw / 2, by0 + 29); });
+    let y = by0 + 54;
+    y = button('刷る', y, () => { const k = pr.n; if (printCopies(pr.sel, k)) { pr.msg = g.name + '〈複製〉を ' + k + ' 個刷った（倉庫へ）'; pr.sel = null; } else pr.msg = mx <= 0 ? 'スクラップが足りない（◆' + TUNE.print.scrapPer + '/部）' : '刷れない'; }, mx > 0 ? COL.portal : null, mx > 0 ? '最大 ' + mx + ' 部（版の残りとスクラップの少ない方）' : 'スクラップが足りない');
+    centerText('刷るほど売れる数は増えるが、売れるたび天井は下がる（刷りすぎ＝値崩れ）', y + 4, F(11, 500), COL.mut);
+    button('やめる', y + 22, () => { pr.sel = null; });
+  }
 }
 function draw() {
   ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, L.w, L.h);
@@ -1542,7 +1641,7 @@ function frame(t) {
 const PR = window.PR = { get G() { return G; }, player, get enemies() { return enemies; }, get S() { return S; }, M, D, newRun, nextFloor, resumeRun, loadRun, saveRun, clearRun, genFloor, god: false, forced: null,
   setInput(x, y) { PR.forced = (x === null) ? null : { x, y }; }, killRoom() { while (enemies.length) killEnemy(enemies.length - 1); },
   step(n) { for (let i = 0; i < n; i++) { if (G.mode === 'run') update(1 / 60); else if (G.mode === 'home') updateHome(1 / 60); else if (G.mode === 'shop') updateShop(1 / 60); else updateFx(1 / 60); if (G.mode === 'run' || G.mode === 'home') animStep(1 / 60); } draw(); }, draw, TUNE, PARTS, startDash, stickRelease, get L() { return L; }, warp(dir) { const nb = neighbor(G.room, dir); if (nb) enterRoom(nb, OPP[dir]); return !!nb; }, press, layout, get UI() { return UI; }, pickChoice, applyPart, PART, freeNear, enterRoom,
-  GOODS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, buyGun, equipGun, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; },
+  GOODS, COPIES, PRINTS, GUNS, GUN, GOOD, NPC, enterHome, returnHome, leaveDungeon, openHome, closeHome, openShop, shelfPut, shelfClear, shopOpen, shopClose, shopFinish, shopRecords, shopExpand, shopShelves, shopStack, reactionOf, ceilingOf, moodOf, recoverMood, mulOf, priceOf, stepMul, marketOf, isPerm, awardPrint, printMax, printCopies, buyGun, equipGun, pickGood, swapPick, spawnGoods, spawnGoodsAround, holdPickups, exportData, importData, wareCount, bagValue, save, get bullets() { return bullets; },
   SKILLS, SLOTS, GEAR, GEARM, FRAMES, FRAME, lv, permLv, patchLv, canPatch, computePerm, bagCap, craftGear, equipGear, forgeGun, awardMold, roomGoods, treasureGoods, bossGoods, exitInfo, missingFor, permList, migrateS, spawnEnemies, IMG, IMG_FILES, loadSprites, drawSprite, drawGun, gunMuzzle, animStep, GUNIMG, GUNFX, gunKick, muzzleAt };
 
 // ---------- 起動 ----------
