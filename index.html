@@ -46,7 +46,7 @@
    工房＝6マス（部位を押す→候補）＋スキル合計／出口の「進む／帰る」に袋の売値と作れる型／素体1（FRAMES）／保存 v3（旧データは自動変換）を載せた。
    操作: 画面のどこでも触れた所が仮想スティックの中心。動く＝避ける／止まる＝撃つ（自動照準）／フリック＝ダッシュ／拠点は台座に乗ると開く
    ===================================================================== */
-const VERSION = 'p3d-0.1.0';
+const VERSION = 'p3d-0.1.1';
 
 // ---------- 定数 ----------
 const TILE = 32, COLS = 12, ROWS = 18, RW = COLS * TILE, RH = ROWS * TILE;   // 部屋＝12×18タイル（外周は壁）
@@ -90,7 +90,7 @@ const TUNE = {
   volt:    { hp: 6, spd: 120, tellDist: 220, tellT: 0.35, dashSpd: 560, dashT: 0.35, restT: 0.6, scale: 1.1 },    // 電猟犬（ビル・猟犬の亜種＝装甲・速い・予兆が短い）
   crawler: { hp: 1, r: 8, crouchT: 0.3, hopDist: 70, hopT: 0.22, restT: 0.15, jitter: 1.5 },   // 這い（工場の刷り損ない）＝沈む(予兆)→跳ぶ→止まる・震える（表示だけ）
   flitter: { hp: 1, r: 8, spd: 150, turnT: 0.25, wobble: 60, fps: 6 },                         // 飛び（ビルの刷り損ない）＝0.25秒ごとに向きが乱れるジグザグ・表示は 6 コマ/秒（コマ落ち）
-  pool:    { n: 3, tellT: 0.9, life: 5, r: 34, spread: 90 },                                   // 腐食の池（工場ボス＝放射弾の差し替え）＝主人公の周りに n 個・予兆(秒)→残る(秒)・半径・散らばり
+  pool:    { n: 3, tellT: 0.9, life: 5, r: 34, spread: 90, sideDeg: 45, fadeOld: 0.5 },        // 腐食の池（工場ボス＝放射弾の差し替え）＝主人公の周りに n 個・予兆(秒・「!」の秒数がこれに足される)→残る(秒)・半径・散らばり・足元以外の池を置く扇（ボス側 ±度）・新しい輪が出た時に古い池が消えるまでの秒数（p3d-0.1.1）
   chain:   { tellT: 0.8, n: 2, gap: 1.0, w: 24, len: 700 },                                    // 電撃の鎖（ビルボス＝三連射の差し替え）＝線を見せる(秒)→放電・本数・2本目までの間(秒)・太さ・長さ
 };
 const COL = {
@@ -1027,7 +1027,7 @@ function updateHome(dt) {
 function openHome(kind) {
   stick.on = false;
   if (kind === 'launch') { G.mode = 'launch'; G.saved = loadRun(); }
-  else if (kind === 'store') G.mode = 'store';
+  else if (kind === 'store') { G.mode = 'store'; PAGE.store = 0; }
   else if (kind === 'forge') G.mode = 'forge';
   else if (kind === 'talk') G.mode = 'talk';
   else if (kind === 'print') { G.print = { sel: null, n: 1, msg: '' }; G.mode = 'print'; }
@@ -1250,12 +1250,13 @@ function updateBoss(e, dt, dx, dy, d) {
         if (e.pat === 'ring') { const pa = Math.atan2(dy, dx), off = (B.ringLaneMinOff + Math.random() * (B.ringLaneMaxOff - B.ringLaneMinOff)) * Math.PI / 180; e.lane = pa + (Math.random() < 0.5 ? off : -off); }   // 安全な扇の向き＝主人公の今の方向から ringLaneMinOff 度以上ずらす＝「扇へ動く」だけで避けられる
         if (e.pat === 'chain') e.lineA = Math.atan2(dy, dx);   // 電撃の鎖＝予兆に入った時点の主人公の方向で線を固定＝線から外れれば当たらない
         e.st = 'tell'; e.t = (e.pat === 'chain' ? TUNE.chain.tellT : e.pat === 'pool' ? B.tell * 0.6 : B.tell * (e.pat === 'volley' ? 0.8 : e.pat === 'ring' ? B.ringTellK : 1)) * D.tellK; e.tellT = e.t; SFX.bossTell();
+        if (e.pat === 'pool') spawnPools(e, e.t);   // p3d-0.1.1: 池の位置は「!」の時点で決めて輪を見せる（鎖と同じ型）＝予兆は「!」＋池の輪の合計・動けば当たらない
       } break;
     case 'tell': e.t -= dt; if (e.pat !== 'chain') e.face = Math.atan2(dy, dx);
       if (e.t <= 0) {
         if (e.pat === 'ring') { e.st = 'ring'; e.t = 0; e.n = 0; }
         else if (e.pat === 'charge') { e.dx = dx / d; e.dy = dy / d; e.st = 'charge'; e.t = B.chargeT; SFX.dash(); }
-        else if (e.pat === 'pool') { spawnPools(); e.st = 'rest'; e.t = B.rest * k; }
+        else if (e.pat === 'pool') { e.st = 'rest'; e.t = B.rest * k; }   // 池は「!」の時点で置いてある（p3d-0.1.1）
         else if (e.pat === 'chain') { fireBolt(e, e.lineA); e.n = 1; e.st = 'chain'; e.t = TUNE.chain.gap; }
         else { e.st = 'volley'; e.t = 0; e.n = 0; }
       } break;
@@ -1268,8 +1269,11 @@ function updateBoss(e, dt, dx, dy, d) {
       if (e.t <= 0) { const a = Math.atan2(dy, dx); for (let i = 0; i < B.volleyN; i++) enemyShot(e.x, e.y, a + (i - (B.volleyN - 1) / 2) * 0.16, B.volleySpd, 5); SFX.eshot(); e.n++; e.t = 0.3; if (e.n >= (e.enraged ? 3 : 2)) { e.st = 'rest'; e.t = B.rest * k; } } break;
   }
 }
-// 3d（#41）: 腐食の池＝主人公の周りに n 個（1つは足元）。予兆 tellT 秒の輪→life 秒残る。触れると被弾（腐食が乗る）
-function spawnPools() { const P = TUNE.pool; for (let i = 0; i < P.n; i++) { const a = Math.random() * 6.2832, r = i === 0 ? 0 : P.spread * (0.5 + Math.random() * 0.5); const q = freeNear(player.x + Math.cos(a) * r, player.y + Math.sin(a) * r); G.pools.push({ x: q.x, y: q.y, t: 0, tell: P.tellT, life: P.life, r: P.r }); } SFX.pool(); }
+// 3d（#41）: 腐食の池＝主人公の周りに n 個（1つは足元）。予兆の輪→life 秒残る。触れると被弾（腐食が乗る）
+// p3d-0.1.1（実機「猶予が足りない・逃げ場所がなくなる」）: (1) 位置は「!」の時点で決めて輪を見せる＝予兆＝「!」の秒数 extraTell ＋ tellT（その間に動けば当たらない） (2) 足元以外の池は「主人公から見てボス側」の扇（±sideDeg・左右に1つずつ）に置く＝ボスから離れる向きは必ず空く（放射弾の安全な扇と同じ型）。数値は据え置き
+function spawnPools(e, extraTell) { const P = TUNE.pool, ba = e ? Math.atan2(e.y - player.y, e.x - player.x) : Math.random() * 6.2832, sd = P.sideDeg * Math.PI / 180;
+  for (const q of G.pools) if (q.t >= q.tell) q.life = Math.min(q.life, q.t - q.tell + P.fadeOld);   // (3) 新しい輪が出たら古い池は fadeOld 秒で消える＝池は常に1組（技の周期より池の寿命が長くても積み上がらない）
+  for (let i = 0; i < P.n; i++) { const a = i === 0 ? 0 : ba + (i % 2 ? 1 : -1) * sd * (0.3 + Math.random() * 0.7), r = i === 0 ? 0 : P.spread * (0.5 + Math.random() * 0.5); const q = freeNear(player.x + Math.cos(a) * r, player.y + Math.sin(a) * r); G.pools.push({ x: q.x, y: q.y, t: 0, tell: P.tellT + (extraTell || 0), life: P.life, r: P.r }); } SFX.pool(); }
 // 3d（#41）: 電撃の鎖＝ボスから角度 a へ伸びる線に一瞬で放電。当たり＝主人公と線分の距離（太さ w）。壁は通す（電気）
 function fireBolt(e, a) {
   const C = TUNE.chain; G.bolts.push({ x: e.x, y: e.y, a, len: C.len, w: C.w, t: 0, life: 0.18 }); SFX.zap(); G.shake = 4;
@@ -1602,10 +1606,11 @@ function drawOverlays() {
     if (S.guns.length > 1) y = button('銃を替える: ' + g.name, y, () => { const i = S.guns.indexOf(S.gun); equipGun(S.guns[(i + 1) % S.guns.length]); }, COL.mod, g.desc);
     y = button('戻る', y, () => closeHome());
   } else if (G.mode === 'store') {
-    overlay(0.8); centerText('倉庫', cy - 200, F(24, 700), COL.scrap);
-    centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '　品は売るか、工房で焼き込む素材にする', cy - 176, F(12, 500), COL.mut);
     const show = goodsVisible().concat(COPIES.filter(g => (S.warehouse[g.id] | 0) > 0));   // 3b: 複製は倉庫にある時だけ並べる。3d: 開いたダンジョンの品だけ
-    const ny = tileGrid(show.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, sub2: g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), cy - 160, show.length > 8 ? 3 : 2);   // p53: 出どころは2行目。3d: 9種以上は3列（画面に収める）
+    const maxY = L.h - L.sab - 4 - 48 - 52, cols = show.length > 8 ? 3 : 2, plan = gridPlan(show.length, cols, maxY - (L.sat + 72), true), gy = Math.max(L.sat + 72, Math.min(cy - 160, maxY - plan.h));   // p3d-0.1.1: 下の案内2行＋「戻る」を引いた高さに収める＝入らなければ上へ詰め、それでも入らなければページに分ける
+    overlay(0.8); centerText('倉庫', gy - 40, F(24, 700), COL.scrap);
+    centerText('品 ' + wareCount() + '個　スクラップ ◆' + S.scrapBank + '　品は売るか、工房で焼き込む素材にする', gy - 16, F(12, 500), COL.mut);
+    const ny = pagedGrid(show.map(g => ({ ch: g.ch, name: g.copy ? GOOD[g.mk].name : g.name, tag: g.copy ? '複製' : null, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, sub2: g.src, col: g.col, dim: !(S.warehouse[g.id] | 0) })), gy, cols, plan, 'store');   // p53: 出どころは2行目。3d: 9種以上は3列（画面に収める）。p3d-0.1.1: ページ分け・複製は札
     const bp = GOODS.filter(g => (S.prints[g.id] | 0) > 0).map(g => g.ch + ' ' + (S.prints[g.id] | 0) + '部').join('　');
     centerText('設計図（版の残り）＝' + (bp || 'なし') + '　→ 輪転機で刷る', ny + 14, F(11, 500), COL.portal);
     centerText('売り物は店の棚へ。値付けは ±10% で探る（天井を超えると売れない）', ny + 32, F(11, 500), COL.mut);
@@ -1642,16 +1647,29 @@ function wrapText(text, cx, y, maxW, lh, font, col, align) {   // 日本語＝1�
   for (const ch of String(text)) { if (ch === '\n' || ctx.measureText(line + ch).width > maxW) { ctx.fillText(line, cx, y); y += lh; line = ch === '\n' ? '' : ch; } else line += ch; }
   if (line) ctx.fillText(line, cx, y); return y + lh;
 }
-function tileGrid(items, y, cols) {   // 小さなタイルのグリッド（袋の中身・倉庫）。act があれば押せる
+function tileGrid(items, y, cols, rows) {   // 小さなタイルのグリッド（袋の中身・倉庫）。act があれば押せる。rows＝戻り値の高さに使う行数（ページ分けで最後のページが短くても下のボタンを動かさない＝p3d-0.1.1）
   const w = Math.min(340, L.w - 32), gap = 8, tw = (w - gap * (cols - 1)) / cols, sub2 = items.some(it => it.sub2), th = FS(50) + (sub2 ? FS(12) : 0), x0 = (L.w - w) / 2;   // p53: 高さ 54→FS(50)=65・sub2（2行目の補足）があれば +FS(12)
   items.forEach((it, i) => { const x = x0 + (i % cols) * (tw + gap), yy = y + Math.floor(i / cols) * (th + gap);
     if (it.act) UI.push({ x, y: yy, w: tw, h: th, act: it.act });
     ctx.globalAlpha = it.dim ? 0.35 : 1; ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, yy, tw, th); ctx.strokeStyle = it.col || '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, yy + 0.5, tw - 1, th - 1);
     ctx.fillStyle = it.col || COL.text; ctx.font = F(16, 700); ctx.textAlign = 'left'; ctx.fillText(it.ch, x + 8, yy + FS(22));
     const nx = cols >= 4 ? FS(24) : FS(28); ctx.fillStyle = COL.text; ctx.font = fitFont(F(cols >= 4 ? 10 : 11, 600), it.name, tw - nx - 4); ctx.fillText(it.name, x + nx, yy + FS(19));   // p53: 名前は枠に収める
-    ctx.fillStyle = COL.mut; ctx.font = fitFont(F(11, 500, true), it.sub || '', tw - 12); ctx.fillText(it.sub || '', x + 8, yy + FS(41));
+    let tagW = 0; if (it.tag) { ctx.font = F(9, 700); tagW = ctx.measureText(it.tag).width + 6; ctx.fillStyle = it.col || COL.text; ctx.textAlign = 'right'; ctx.fillText(it.tag, x + tw - 4, yy + FS(41)); ctx.textAlign = 'left'; }   // p3d-0.1.1: 札＝右下（複製＝名前に〈複製〉を足すと枠からはみ出るため）
+    ctx.fillStyle = COL.mut; ctx.font = fitFont(F(11, 500, true), it.sub || '', tw - 12 - tagW); ctx.fillText(it.sub || '', x + 8, yy + FS(41));
     if (it.sub2) { ctx.font = fitFont(F(10, 500), it.sub2, tw - 12); ctx.fillText(it.sub2, x + 8, yy + FS(41) + FS(12)); } ctx.globalAlpha = 1; });
-  return y + Math.ceil(items.length / cols) * (th + gap);
+  return y + (rows || Math.ceil(items.length / cols)) * (th + gap);
+}
+const PAGE = {};   // p3d-0.1.1: タイルのグリッドの今のページ（画面ごと＝'shop'・'store'）
+function gridPlan(n, cols, room, sub2) {   // p3d-0.1.1: n 個のタイルが高さ room に収まらなければページに分ける（列は増やさない＝4列だと名前が潰れる）。per＝1ページの個数／pages／rows／h＝使う高さ（2ページ以上なら「次のページ」ボタンの 58 を含む）
+  const rh = FS(50) + (sub2 ? FS(12) : 0) + 8; let per = Math.max(cols, Math.floor(room / rh) * cols), pages = 1;
+  if (n > per) { per = Math.max(cols, Math.floor((room - 58) / rh) * cols); pages = Math.ceil(n / per); }
+  const rows = Math.ceil(Math.min(n, per) / cols); return { per, pages, rows, h: rows * rh + (pages > 1 ? 58 : 0) };
+}
+function pagedGrid(items, y, cols, plan, key) {   // gridPlan の1ページぶんを描き、2ページ以上なら「次のページ」ボタン（押すと巡回）。戻り値＝下端
+  const pg = Math.min(PAGE[key] | 0, plan.pages - 1); PAGE[key] = pg;
+  let ny = tileGrid(items.slice(pg * plan.per, (pg + 1) * plan.per), y, cols, plan.rows);
+  if (plan.pages > 1) ny = button('次のページ ▶　' + (pg + 1) + ' / ' + plan.pages, ny, () => { PAGE[key] = (pg + 1) % plan.pages; });
+  return ny;
 }
 function skillLine(list) { return list.map(o => o.k.short + (o.n > 1 ? '×' + o.n : '')).join(' '); }
 function gearSkillText(g) { return Object.keys(g.skills).length ? Object.keys(g.skills).map(k => PART[k].name + ' Lv' + g.skills[k]).join('・') : 'スキル無し'; }
@@ -1724,7 +1742,7 @@ function drawShop(cy) {   // 店の1日（3b）＝上に棚（3〜5）、中に�
   // 棚（拡張で3→4→5）
   const w = Math.min(340, L.w - 32), gap = 8, n = sh.shelves.length, tw = (w - gap * (n - 1)) / n, th = FS(70), x0 = (L.w - w) / 2, sy = top + 44;   // p53: 棚の高さ 78→FS(70)=91
   sh.shelves.forEach((s, i) => { const x = x0 + i * (tw + gap);
-    if (sh.phase === 'setup') UI.push({ x, y: sy, w: tw, h: th, act: () => { sh.pick = i; if (s) { sh.sel = s.id; sh.mul = s.mul; sh.edit = true; } else { sh.sel = null; sh.edit = false; } } });   // 3b: 品のある棚を押す＝値を変える／倉庫へ戻す
+    if (sh.phase === 'setup') UI.push({ x, y: sy, w: tw, h: th, act: () => { sh.pick = i; PAGE.shop = 0; if (s) { sh.sel = s.id; sh.mul = s.mul; sh.edit = true; } else { sh.sel = null; sh.edit = false; } } });   // 3b: 品のある棚を押す＝値を変える／倉庫へ戻す
     ctx.fillStyle = (sh.phase === 'setup' && sh.pick === i) ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.07)'; ctx.fillRect(x, sy, tw, th); ctx.strokeStyle = s ? GOOD[s.id].col : '#2a3a60'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 0.5, sy + 0.5, tw - 1, th - 1);
     ctx.textAlign = 'center';
     if (!s) { ctx.fillStyle = COL.mut; ctx.font = F(22, 700); ctx.fillText('＋', x + tw / 2, sy + FS(36)); const t = sh.phase === 'setup' ? '棚に置く' : '空'; ctx.font = fitFont(F(10, 500), t, tw - 6); ctx.fillText(t, x + tw / 2, sy + FS(58)); }
@@ -1734,9 +1752,16 @@ function drawShop(cy) {   // 店の1日（3b）＝上に棚（3〜5）、中に�
       ctx.fillStyle = COL.scrap; ctx.font = fitFont(F(11, 700, true), 'Cr ' + s.price, tw - 6); ctx.fillText('Cr ' + s.price, x + tw / 2, sy + FS(48)); ctx.font = fitFont(F(10, 700, true), '×' + s.mul.toFixed(1), tw - 6); ctx.fillText('×' + s.mul.toFixed(1), x + tw / 2, sy + FS(62));
       if (g.copy) { ctx.fillStyle = g.col; ctx.font = F(8, 700); ctx.textAlign = 'right'; ctx.fillText('複', x + tw - 3, sy + th - 4); ctx.textAlign = 'center'; } }   // 複製の印＝右下（1行目の「×n」と重ねない）
   });
+  // 品を選ぶ欄＝品の種類の数から高さを決める（p3d-0.1.1: 品が12種になり、2行ぶんの固定枠では下の行と「やめる」が画面の外に出て押せなかった＝p53 で「3列」にした時と同じ穴）。土間は選ぶ間は使わないので足りないぶんは土間を削り、3列で入らなければ4列
+  const fy = sy + th + 10; let pk = null;
+  if (sh.phase === 'setup' && sh.pick !== null && sh.sel === null) {
+    const avail = GOODS.concat(COPIES).filter(g => (S.warehouse[g.id] | 0) > 0), yEnd = L.h - L.sab - 4 - 48 - 4, yTop = fy + FS(26);   // yEnd＝「やめる」の上端／yTop＝棚の直下（見出しのぶん空ける）
+    const plan = gridPlan(avail.length, 3, yEnd - yTop); pk = { avail, plan, y: Math.max(yTop, yEnd - plan.h) };   // 下から積み、土間を削っても入らなければページに分ける
+  }
   // 土間＝客が歩く（品の選択・値付けのときは下の欄が高くなるぶん縮める）
-  const shift = (sh.phase === 'setup' && sh.pick !== null) ? (sh.sel === null ? 2 * (FS(50) - 54) + 4 : (sh.edit ? 108 : 68)) : (sh.phase === 'setup' && TUNE.shop.expand[S.shopLv]) ? 12 : 0;   // 値付け＝68／棚の値の変更＝108（ボタン1つ多い）／準備でボタン3つ＝12（版表示と重ねない）
-  const fy = sy + th + 10, fh = Math.max(120, L.h - L.sab - 200 - fy - shift);
+  const shift = pk ? 0 : (sh.phase === 'setup' && sh.pick !== null) ? (sh.edit ? 108 : 68) : (sh.phase === 'setup' && TUNE.shop.expand[S.shopLv]) ? 12 : 0;   // 値付け＝68／棚の値の変更＝108（ボタン1つ多い）／準備でボタン3つ＝12（版表示と重ねない）
+  const fh = pk ? pk.y - FS(26) - fy : Math.max(120, L.h - L.sab - 200 - fy - shift);
+  if (fh >= 60) {   // 土間が残る時だけ描く（品選びで削り切った時は描かない）
   ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fillRect(x0, fy, w, fh); ctx.strokeStyle = '#1f2c4c'; ctx.strokeRect(x0 + 0.5, fy + 0.5, w - 1, fh - 1);
   ctx.fillStyle = COL.mut; ctx.font = F(10, 500); ctx.textAlign = 'center'; ctx.fillText('入口', x0 + w / 2, fy + fh - 6);
   for (const c of sh.custs) { const tx = c.i >= 0 ? x0 + c.i * (tw + gap) + tw / 2 : x0 + w / 2, ty = fy + 18, ex = x0 + w / 2, ey = fy + fh - 16;
@@ -1751,15 +1776,15 @@ function drawShop(cy) {   // 店の1日（3b）＝上に棚（3〜5）、中に�
     const hint = '「高すぎる」は天井の上。売れるほど天井は下がり、出撃で戻る'; ctx.fillStyle = COL.mut; ctx.font = fitFont(F(10, 500), hint, w - 16); ctx.fillText(hint, x0 + 8, ry + 2);
   } else { ctx.fillStyle = COL.mut; sh.log.slice(0, 4).forEach((t, i) => { ctx.font = fitFont(F(11, 500), t, w - 16); ctx.fillText(t, x0 + 8, fy + fh - FS(66) + i * FS(14)); }); }
   ctx.textAlign = 'right'; ctx.fillStyle = COL.mut; ctx.font = F(11, 500); ctx.fillText(sh.phase === 'setup' ? '棚をタップして品を置く' : sh.phase === 'open' ? '客 ' + sh.served + '/' + sh.custN : '閉店', x0 + w - 8, fy + 16);
+  }
   // 下のボタン／品の選択／値付け
   let y = L.h - L.sab - 180 - ((sh.phase === 'setup' && sh.pick === null) ? shift : 0);
   if (sh.phase === 'setup' && sh.pick !== null) {
     y -= shift;
-    if (sh.sel === null) {   // 品を選ぶ（複製も並ぶ）
-      const avail = GOODS.concat(COPIES).filter(g => (S.warehouse[g.id] | 0) > 0);
-      if (!avail.length) { centerText('倉庫に品がない', y + 20, F(14, 600), COL.mut); button('やめる', y + 40, () => { sh.pick = null; }); return; }
-      centerText('棚 ' + (sh.pick + 1) + ' に置く品を選ぶ', y - 6, F(13, 600));
-      const ny = tileGrid(avail.map(g => ({ ch: g.ch, name: g.name, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, act: () => { sh.sel = g.id; sh.mul = mulOf(g.id); } })), y + 4, 3);   // p53: 3列
+    if (pk) {   // 品を選ぶ（複製も並ぶ）＝寸法は上の pk（品の数から決めた）
+      if (!pk.avail.length) { centerText('倉庫に品がない', y + 20, F(14, 600), COL.mut); button('やめる', y + 40, () => { sh.pick = null; }); return; }
+      centerText('棚 ' + (sh.pick + 1) + ' に置く品を選ぶ', pk.y - 10, F(13, 600));
+      const ny = pagedGrid(pk.avail.map(g => ({ ch: g.ch, name: g.copy ? GOOD[g.mk].name : g.name, tag: g.copy ? '複製' : null, sub: '×' + (S.warehouse[g.id] | 0) + '　Cr ' + g.base, col: g.col, act: () => { sh.sel = g.id; sh.mul = mulOf(g.id); } })), pk.y, 3, pk.plan, 'shop');   // p53: 3列／p3d-0.1.1: 入らなければページ分け・複製は札
       button('やめる', ny + 4, () => { sh.pick = null; });
     } else {   // 値付け＝±10%（R30）。数字で見せるのは自分の値だけ＝天井は客の反応で探る（R28）
       const g = GOOD[sh.sel], price = priceOf(sh.sel, sh.mul), P = TUNE.shop.price;
