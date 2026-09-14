@@ -1,7 +1,7 @@
 // PRINT RUN Service Worker（オフライン起動用）
 // 方針: ページ本体（index.html）はネットワーク優先・失敗時はキャッシュ／それ以外はキャッシュ優先。
 // 版が上がったら CACHE 名を変える（古いキャッシュは activate で削除）。
-const CACHE = 'pr-p3d-0.1.3';
+const CACHE = 'pr-p3c2-0.1.0';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './img/hero.png', './img/rusher.png', './img/hero_run.png', './img/rusher_run.png', './img/guns.png',
   './img/iron.png', './img/iron_run.png', './img/volt.png', './img/volt_run.png', './img/crawler.png', './img/flitter.png'];   // Phase 5-0/5-1: スプライト画像もオフライン用に先読み。3d: 猟犬の亜種（色替え）。p3d-0.1.2: 刷り損ない2枚（マスターの生成・2026-09-14）
 
